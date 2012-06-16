@@ -377,6 +377,9 @@ extern	cvar_t	*cl_inGameVideo;
 extern	cvar_t	*cl_lanForcePackets;
 extern	cvar_t	*cl_autoRecordDemo;
 
+#ifdef USE_AUTH
+extern cvar_t	*cl_authChallenge;
+#endif
 //=================================================
 
 //
