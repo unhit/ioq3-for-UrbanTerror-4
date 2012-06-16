@@ -2752,9 +2752,11 @@ void CL_Init( void ) {
 
 	cl_guidServerUniq = Cvar_Get ("cl_guidServerUniq", "1", CVAR_ARCHIVE);
 	
+	#ifdef USE_AUTH
 	//@Barbatos
 	cl_authChallenge = Cvar_Get( "cl_authChallenge", "", CVAR_ARCHIVE | CVAR_USERINFO);
-
+	#endif
+	
 	// userinfo
 	Cvar_Get ("name", "UnnamedPlayer", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("rate", "3000", CVAR_USERINFO | CVAR_ARCHIVE );

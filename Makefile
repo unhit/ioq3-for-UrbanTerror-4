@@ -29,6 +29,10 @@ BUILD_SERVER     =1
 BUILD_GAME_SO    =0
 BUILD_GAME_QVM   =0
 
+# Barbatos - Urban Terror 4.2 auth system
+# You're not forced to use it. Off by default.
+USE_AUTH		=0 
+
 ifneq ($(PLATFORM),darwin)
   BUILD_CLIENT_SMP = 0
 endif

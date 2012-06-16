@@ -1095,6 +1095,7 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return CL_CDKeyValidate(VMA(1), VMA(2));
 
 	//@Barbatos
+	#ifdef USE_AUTH
 	case UI_NET_STRINGTOADR:
 		return NET_StringToAdr( VMA(1), VMA(2));
 		
@@ -1114,6 +1115,8 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 	case UI_COPYSTRING:
 		return CopyString(VMA(1));
 
+	#endif
+	
 	default:
 		Com_Error( ERR_DROP, "Bad UI system trap: %ld", (long int) args[0] );
 
