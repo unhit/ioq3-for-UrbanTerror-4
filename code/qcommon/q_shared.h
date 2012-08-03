@@ -139,6 +139,9 @@ typedef int		fileHandle_t;
 typedef int		clipHandle_t;
 
 #define PAD(x,y) (((x)+(y)-1) & ~((y)-1))
+#define PADLEN(base, alignment)	(PAD((base), (alignment)) - (base))
+
+#define PADP(base, alignment)	((void *) PAD((intptr_t) (base), (alignment)))
 
 #ifdef __GNUC__
 #define ALIGN(x) __attribute__((aligned(x)))
@@ -153,6 +156,8 @@ typedef int		clipHandle_t;
 #define	MAX_QINT			0x7fffffff
 #define	MIN_QINT			(-MAX_QINT-1)
 
+#define ARRAY_LEN(x)			(sizeof(x) / sizeof(*(x)))
+#define STRARRAY_LEN(x)			(ARRAY_LEN(x) - 1)
 
 // angle indexes
 #define	PITCH				0		// up / down
@@ -593,6 +598,40 @@ void AngleVectors( const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 void PerpendicularVector( vec3_t dst, const vec3_t src );
 int Q_isnan( float x );
 
+#if idx64
+  extern long qftolsse(float f);
+  extern int qvmftolsse(void);
+  extern void qsnapvectorsse(vec3_t vec);
+
+  #define Q_ftol qftolsse
+  #define Q_SnapVector qsnapvectorsse
+
+  extern int (*Q_VMftol)(void);
+#elif id386
+  extern long QDECL qftolx87(float f);
+  extern long QDECL qftolsse(float f);
+  extern int QDECL qvmftolx87(void);
+  extern int QDECL qvmftolsse(void);
+  extern void QDECL qsnapvectorx87(vec3_t vec);
+  extern void QDECL qsnapvectorsse(vec3_t vec);
+
+  extern long (QDECL *Q_ftol)(float f);
+  extern int (QDECL *Q_VMftol)(void);
+  extern void (QDECL *Q_SnapVector)(vec3_t vec);
+#else
+  // Q_ftol must expand to a function name so the pluggable renderer can take
+  // its address
+  #define Q_ftol lrintf
+  #define Q_SnapVector(vec)\
+	do\
+	{\
+		vec3_t *temp = (vec);\
+		\
+		(*temp)[0] = round((*temp)[0]);\
+		(*temp)[1] = round((*temp)[1]);\
+		(*temp)[2] = round((*temp)[2]);\
+	} while(0)
+#endif
 
 //=============================================
 
