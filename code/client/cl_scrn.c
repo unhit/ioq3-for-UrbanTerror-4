@@ -30,7 +30,6 @@ cvar_t		*cl_debuggraph;
 cvar_t		*cl_graphheight;
 cvar_t		*cl_graphscale;
 cvar_t		*cl_graphshift;
-cvar_t		*cl_drawclock;
 
 /*
 ================
@@ -318,6 +317,136 @@ int	SCR_GetBigStringWidth( const char *str ) {
 	return SCR_Strlen( str ) * 16;
 }
 
+int SCR_FontWidth(const char *text, float scale) {
+	if (!cls.fontFont)
+		return 0;
+
+	int 		 count, len;
+	float		 out;
+	glyphInfo_t  *glyph;
+	float		 useScale;
+	const char	 *s    = text;
+	fontInfo_t	 *font = &cls.font;
+
+	useScale = scale * font->glyphScale;
+	out  = 0;
+
+	if (text) {
+		len = strlen(text);
+		count = 0;
+
+		while (s && *s && count < len) {
+			if (Q_IsColorString(s)) {
+				s += 2;
+				continue;
+			}
+
+			glyph = &font->glyphs[(int)*s];
+			out  += glyph->xSkip;
+			s++;
+			count++;
+		}
+	}
+	return out * useScale;
+}
+
+
+void SCR_DrawFontChar(float x, float y, float width, float height, float scale, float s, float t, float s2, float t2, qhandle_t hShader) {
+	if (!cls.fontFont)
+		return;
+
+	float  w, h;
+
+	w = width * scale;
+	h = height * scale;
+	SCR_AdjustFrom640(&x, &y, &w, &h);
+	re.DrawStretchPic(x, y, w, h, s, t, s2, t2, hShader);
+}
+
+/**
+ * $(function)
+ */
+void SCR_DrawFontText(float x, float y, float scale, vec4_t color, const char *text, int style) {
+	if (!cls.fontFont)
+		return;
+	
+	int 	 len, count;
+	vec4_t		 newColor;
+	vec4_t		 black = {0.0f, 0.0f, 0.0f, 1.0f};
+	vec4_t       grey = { 0.2f, 0.2f, 0.2f, 1.0f };
+	glyphInfo_t  *glyph;
+	float		 useScale;
+	fontInfo_t	 *font = &cls.font;
+
+	useScale = scale * font->glyphScale;
+
+	if (text) {
+		const char	*s = text;
+		re.SetColor( color );
+		memcpy(&newColor[0], &color[0], sizeof(vec4_t));
+		len = strlen(text);
+
+		count = 0;
+
+		while (s && *s && count < len) {
+			glyph = &font->glyphs[(int)*s];
+
+			if (Q_IsColorString(s)) {
+				memcpy( newColor, g_color_table[ColorIndex(*(s + 1))], sizeof(newColor));
+				newColor[3] = color[3];
+				re.SetColor( newColor );
+				s += 2;
+				continue;
+			}
+
+			float  yadj = useScale * glyph->top;
+
+			if ((style == ITEM_TEXTSTYLE_SHADOWED) || (style == ITEM_TEXTSTYLE_SHADOWEDLESS)) {
+				black[3] = newColor[3];
+
+				if (style == ITEM_TEXTSTYLE_SHADOWEDLESS)
+					black[3] *= 0.7;
+
+				if (newColor[0] == 0.0f && newColor[1] == 0.0f && newColor[2] == 0.0f) {
+					grey[3] = black[3];
+					re.SetColor(grey);
+				} else {
+					re.SetColor(black);
+				}
+
+				SCR_DrawFontChar(x + 1, y - yadj + 1,
+						  glyph->imageWidth,
+						  glyph->imageHeight,
+						  useScale,
+						  glyph->s,
+						  glyph->t,
+						  glyph->s2,
+						  glyph->t2,
+						  glyph->glyph);
+
+				colorBlack[3] = 1.0;
+				re.SetColor(newColor);
+			}
+
+			SCR_DrawFontChar(x, y - yadj,
+					  glyph->imageWidth,
+					  glyph->imageHeight,
+					  useScale,
+					  glyph->s,
+					  glyph->t,
+					  glyph->s2,
+					  glyph->t2,
+					  glyph->glyph);
+			x += (glyph->xSkip * useScale);
+			s++;
+			count++;
+		}
+		re.SetColor(NULL);
+	}
+}
+
+
+
 
 //===============================================================================
 
@@ -341,22 +470,6 @@ void SCR_DrawDemoRecording( void ) {
 	sprintf( string, "RECORDING %s: %ik", clc.demoName, pos / 1024 );
 
 	SCR_DrawStringExt( 320 - strlen( string ) * 4, 1, 7, string, g_color_table[7], qtrue );
-}
-
-
-/*
-=================
-SCR_DrawClock
-=================
-*/
-void SCR_DrawClock( void ) {
-	qtime_t myTime;
-	char	string[16];
-	if (Cvar_VariableValue ("cl_drawclock")) {
-		Com_RealTime( &myTime );
-		Com_sprintf( string, sizeof ( string ), "%02i:%02i:%02i", myTime.tm_hour, myTime.tm_min, myTime.tm_sec );
-		SCR_DrawStringExt( 320 - strlen( string ) * 4, 11, 8, string, g_color_table[7], qtrue );
-	}
 }
 
 
@@ -438,7 +551,6 @@ void SCR_Init( void ) {
 	cl_graphheight = Cvar_Get ("graphheight", "32", CVAR_CHEAT);
 	cl_graphscale = Cvar_Get ("graphscale", "1", CVAR_CHEAT);
 	cl_graphshift = Cvar_Get ("graphshift", "0", CVAR_CHEAT);
-	cl_drawclock = Cvar_Get ("cl_drawclock", "0", CVAR_ARCHIVE);
 
 	scr_initialized = qtrue;
 }
@@ -508,7 +620,6 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 		case CA_ACTIVE:
 			CL_CGameRendering( stereoFrame );
 			SCR_DrawDemoRecording();
-			SCR_DrawClock();
 			break;
 		}
 	}

@@ -153,8 +153,12 @@ cvar_t	*r_saveFontData;
 cvar_t	*r_GLlibCoolDownMsec;
 
 cvar_t	*r_maxpolys;
-int		max_polys;
 cvar_t	*r_maxpolyverts;
+
+cvar_t  *r_noborder;
+cvar_t 	*r_centerWindow;
+
+int		max_polys;
 int		max_polyverts;
 
 static void AssertCvarRange( cvar_t *cv, float minVal, float maxVal, qboolean shouldBeIntegral )
@@ -302,7 +306,13 @@ vidmode_t r_vidModes[] =
     { "Mode  8: 1280x1024",		1280,	1024,	1 },
     { "Mode  9: 1600x1200",		1600,	1200,	1 },
     { "Mode 10: 2048x1536",		2048,	1536,	1 },
-    { "Mode 11: 856x480 (wide)",856,	480,	1 }
+    { "Mode 11: 856x480 (wide)",	856,	480,	1 },
+    { "Mode 12: 1280x720 (wide)",	1280, 	720,	1 },
+    { "Mode 13: 1366x768 (wide)",	1366,	768,	1 },
+    { "Mode 14: 1600x900 (wide)",	1600,	900,	1 },
+    { "Mode 15: 1680x1050 (wide)",	1680,	1050,	1 },
+    { "Mode 16: 1920x1080 (wide)",	1920,	1080,	1 },
+    { "Mode 17: 2560x1440 (wide)",	2560,	1440,	1 }
 };
 static int	s_numVidModes = ( sizeof( r_vidModes ) / sizeof( r_vidModes[0] ) );
 
@@ -1049,6 +1059,9 @@ void R_Register( void )
 	r_maxpolyverts = ri.Cvar_Get( "r_maxpolyverts", va("%d", MAX_POLYVERTS), 0);
 
 	r_GLlibCoolDownMsec = ri.Cvar_Get( "r_GLlibCoolDownMsec", "0", CVAR_ARCHIVE );
+
+	r_noborder = ri.Cvar_Get("r_noborder", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	r_centerWindow = ri.Cvar_Get("r_centerWindow", "1", CVAR_ARCHIVE | CVAR_LATCH );
   
 	// make sure all the commands added here are also
 	// removed in R_Shutdown

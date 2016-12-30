@@ -655,7 +655,7 @@ static qboolean GLW_CreateWindow( const char *drivername, int width, int height,
 		else
 		{
 			exstyle = 0;
-			stylebits = WINDOW_STYLE|WS_SYSMENU|WS_MINIMIZEBOX;
+			stylebits = (r_noborder->integer == 1 && !cdsFullscreen) ? WS_EX_TOPMOST|WS_POPUP|WS_VISIBLE : WINDOW_STYLE|WS_SYSMENU|WS_MINIMIZEBOX;
 			AdjustWindowRect (&r, stylebits, FALSE);
 		}
 
@@ -669,25 +669,34 @@ static qboolean GLW_CreateWindow( const char *drivername, int width, int height,
 		}
 		else
 		{
-			vid_xpos = ri.Cvar_Get ("vid_xpos", "", 0);
-			vid_ypos = ri.Cvar_Get ("vid_ypos", "", 0);
-			x = vid_xpos->integer;
-			y = vid_ypos->integer;
-
-			// adjust window coordinates if necessary 
-			// so that the window is completely on screen
-			if ( x < 0 )
-				x = 0;
-			if ( y < 0 )
-				y = 0;
-
-			if ( w < glw_state.desktopWidth &&
-				 h < glw_state.desktopHeight )
+			if (r_noborder->integer == 1 && r_centerWindow->integer == 1) 
 			{
-				if ( x + w > glw_state.desktopWidth )
-					x = ( glw_state.desktopWidth - w );
-				if ( y + h > glw_state.desktopHeight )
-					y = ( glw_state.desktopHeight - h );
+				x = (glw_state.desktopWidth - r.right) / 2;
+				y = (glw_state.desktopHeight - r.bottom) / 2;
+			}
+			else 
+			{
+				vid_xpos = ri.Cvar_Get ("vid_xpos", "", 0);
+				vid_ypos = ri.Cvar_Get ("vid_ypos", "", 0);
+
+				x = vid_xpos->integer;
+				y = vid_ypos->integer;
+
+				// adjust window coordinates if necessary 
+				// so that the window is completely on screen
+				if ( x < 0 )
+					x = 0;
+				if ( y < 0 )
+					y = 0;
+
+				if ( w < glw_state.desktopWidth &&
+					 h < glw_state.desktopHeight )
+				{
+					if ( x + w > glw_state.desktopWidth )
+						x = ( glw_state.desktopWidth - w );
+					if ( y + h > glw_state.desktopHeight )
+						y = ( glw_state.desktopHeight - h );
+				}
 			}
 		}
 
@@ -935,16 +944,28 @@ static rserr_t GLW_SetMode( const char *drivername,
 					
 					PrintCDSError( cdsRet );
 					
-					ri.Printf( PRINT_ALL, "...restoring display settings\n" );
-					ChangeDisplaySettings( 0, 0 );
-					
-					glw_state.cdsFullscreen = qfalse;
-					glConfig.isFullscreen = qfalse;
-					if ( !GLW_CreateWindow( drivername, glConfig.vidWidth, glConfig.vidHeight, colorbits, qfalse) )
+					//@Barbatos - try initializing default 800x600 mode instead of crashing
+					ri.Printf( PRINT_ALL, "... trying to fallback to r_mode 4 (800x600)\n");
+					ri.Cvar_Set( "r_mode", "4" );
+					glw_state.cdsFullscreen = qtrue;
+
+					if ( !GLW_CreateWindow( drivername, glConfig.vidWidth, glConfig.vidHeight, colorbits, qtrue) )
 					{
-						return RSERR_INVALID_MODE;
+						ri.Printf( PRINT_ALL, "...restoring display settings\n" );
+						ChangeDisplaySettings( 0, 0 );
+						glw_state.cdsFullscreen = qfalse;
+						glConfig.isFullscreen = qfalse;
+						if ( !GLW_CreateWindow( drivername, glConfig.vidWidth, glConfig.vidHeight, colorbits, qfalse) )
+						{
+							return RSERR_INVALID_MODE;
+						}
+						return RSERR_INVALID_FULLSCREEN;
 					}
-					return RSERR_INVALID_FULLSCREEN;
+					// Perform a vid_restart to apply the changes
+					else {
+						Cbuf_AddText( "vid_restart" );
+					}
+					
 				}
 			}
 		}

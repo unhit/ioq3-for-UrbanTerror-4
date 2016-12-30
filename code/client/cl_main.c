@@ -36,7 +36,6 @@ cvar_t	*rconAddress;
 cvar_t	*cl_timeout;
 cvar_t	*cl_maxpackets;
 cvar_t	*cl_packetdup;
-cvar_t	*cl_master;
 cvar_t	*cl_timeNudge;
 cvar_t	*cl_showTimeDelta;
 cvar_t	*cl_freezeDemo;
@@ -82,12 +81,17 @@ cvar_t	*cl_altTab;
 cvar_t  *cl_mouseAccelOffset;
 cvar_t  *cl_mouseAccelStyle;
 
+cvar_t  *cl_lastServerAddress;
+
 //@Barbatos
 #ifdef USE_AUTH
 cvar_t  *cl_auth_engine;
 cvar_t  *cl_auth;
 cvar_t  *authc;
+cvar_t  *authl;
 #endif
+
+cvar_t	*cl_masterServers[CL_MAX_MASTER_SERVERS];
 
 clientActive_t		cl;
 clientConnection_t	clc;
@@ -152,7 +156,24 @@ not have future usercmd_t executed before it is executed
 ======================
 */
 void CL_AddReliableCommand( const char *cmd ) {
-	int		index;
+	int    index, i;
+	char   realCommand[MAX_STRING_CHARS];
+
+	Cmd_TokenizeString(cmd);
+	Q_strncpyz(realCommand, cmd, sizeof(realCommand));
+
+	if (!Q_stricmp(Cmd_Argv(0), "say") ||
+		!Q_stricmp(Cmd_Argv(0), "say_team") ||
+		!Q_stricmp(Cmd_Argv(0), "ut_radio") ||
+		!Q_stricmp(Cmd_Argv(0), "tell") ||
+		!Q_stricmp(Cmd_Argv(0), "tell_target") ||
+		!Q_stricmp(Cmd_Argv(0), "tell_attacker")) {
+		for (i = 0; i < strlen(realCommand); i++) {
+			if (realCommand[i] == '%') {
+				realCommand[i] = 31;
+			}
+		}
+	}
 
 	// if we would be losing an old command that hasn't been acknowledged,
 	// we must drop the connection
@@ -161,7 +182,7 @@ void CL_AddReliableCommand( const char *cmd ) {
 	}
 	clc.reliableSequence++;
 	index = clc.reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
-	Q_strncpyz( clc.reliableCommands[ index ], cmd, sizeof( clc.reliableCommands[ index ] ) );
+	Q_strncpyz( clc.reliableCommands[ index ], realCommand, sizeof( clc.reliableCommands[ index ] ) );
 }
 
 /*
@@ -170,9 +191,9 @@ CL_ChangeReliableCommand
 ======================
 */
 void CL_ChangeReliableCommand( void ) {
-	int r, index, l;
+	int index, l;
 
-	r = clc.reliableSequence - (random() * 5);
+	//r = clc.reliableSequence - (random() * 5);
 	index = clc.reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
 	l = strlen(clc.reliableCommands[ index ]);
 	if ( l >= MAX_STRING_CHARS - 1 ) {
@@ -607,8 +628,7 @@ void CL_PlayDemo_f( void ) {
 	char		*arg, *ext_test;
 #ifdef USE_DEMO_FORMAT_42
 	int			r, len, v1, v2;
-	char		*s1, *s2;
-	const char  *serverInfo;
+	char		*s2;
 #else
 	int			protocol, i;
 	char		retry[MAX_OSPATH];
@@ -678,8 +698,8 @@ void CL_PlayDemo_f( void ) {
 
 		
 	//@Barbatos: get the mod version from the server
-	serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];
-	s1 = Info_ValueForKey(serverInfo, "g_modversion");
+	//serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];
+	//s1 = Info_ValueForKey(serverInfo, "g_modversion");
 	
 	
 	r = FS_Read( &len, 4, clc.demofile );
@@ -1241,12 +1261,12 @@ CL_Reconnect_f
 ================
 */
 void CL_Reconnect_f( void ) {
-	if ( !strlen( cls.servername ) || !strcmp( cls.servername, "localhost" ) ) {
+	if (!strlen(cl_lastServerAddress->string) || !strcmp(cl_lastServerAddress->string, "localhost")) {
 		Com_Printf( "Can't reconnect to localhost.\n" );
 		return;
 	}
 	Cvar_Set("ui_singlePlayerActive", "0");
-	Cbuf_AddText( va("connect %s\n", cls.servername ) );
+	Cbuf_AddText(va("connect %s\n", cl_lastServerAddress->string));
 }
 
 /*
@@ -1273,6 +1293,7 @@ void CL_Connect_f( void ) {
 	clc.serverMessage[0] = 0;
 
 	server = Cmd_Argv (1);
+	Q_strncpyz( cls.servername, server, sizeof(cls.servername) );
 
 	if ( com_sv_running->integer && !strcmp( server, "localhost" ) ) {
 		// if running a local server, kill it
@@ -1290,7 +1311,6 @@ void CL_Connect_f( void ) {
 	CL_FlushMemory( );
 	*/
 
-	Q_strncpyz( cls.servername, server, sizeof(cls.servername) );
 
 	if (!NET_StringToAdr( cls.servername, &clc.serverAddress) ) {
 		Com_Printf ("Bad server address\n");
@@ -1319,6 +1339,8 @@ void CL_Connect_f( void ) {
 	} else {
 		cls.state = CA_CONNECTING;
 	}
+
+	Cvar_Set("cl_lastServerAddress", serverString);
 
 	cls.keyCatchers = 0;
 	clc.connectTime = -99999;	// CL_CheckForResend() will fire immediately
@@ -1847,6 +1869,10 @@ void CL_DownloadMenu(int key)
 		CL_NextDownload();
 	}
 
+}
+
+qboolean CL_IsDownloading(void) {
+	return clc.cURLUsed;
 }
 
 /*
@@ -2575,6 +2601,13 @@ void CL_InitRenderer( void ) {
 	cls.charSetShader = re.RegisterShader( "gfx/2d/bigchars" );
 	cls.whiteShader = re.RegisterShader( "white" );
 	cls.consoleShader = re.RegisterShader( "console" );
+
+	if (FS_ReadFile("fonts/fontImage_20.dat", NULL) > 0) {
+		re.RegisterFont("fonts/fontImage_20.dat", 20, &cls.font);
+		cls.fontFont = qtrue;
+	}
+
+
 	g_console_field_width = cls.glconfig.vidWidth / SMALLCHAR_WIDTH - 2;
 	g_consoleField.widthInChars = g_console_field_width;
 }
@@ -2851,7 +2884,6 @@ void CL_Init( void ) {
 	cl_motd = Cvar_Get ("cl_motd", "1", 0);
 
 	cl_timeout = Cvar_Get ("cl_timeout", "200", 0);
-	cl_master = Cvar_Get ("cl_master", MASTER_SERVER_NAME, CVAR_ARCHIVE);
 	cl_timeNudge = Cvar_Get ("cl_timeNudge", "0", CVAR_TEMP );
 	cl_shownet = Cvar_Get ("cl_shownet", "0", CVAR_TEMP );
 	cl_showSend = Cvar_Get ("cl_showSend", "0", CVAR_TEMP );
@@ -2883,13 +2915,15 @@ void CL_Init( void ) {
 
 	// 0: legacy mouse acceleration
 	// 1: new implementation
+	// 2: newest implementation (limited and smooth)
 	cl_mouseAccelStyle = Cvar_Get( "cl_mouseAccelStyle", "0", CVAR_ARCHIVE );
 
-	// offset for the power function (for style 1, ignored otherwise)
-	// this should be set to the max rate value
+	// for style 1: offset for the power function, should be set to the max rate value
+	// for style 2: rate for which acceleration is half of the maximum.
 	cl_mouseAccelOffset = Cvar_Get( "cl_mouseAccelOffset", "5", CVAR_ARCHIVE );
 
 	cl_showMouseRate = Cvar_Get ("cl_showmouserate", "0", 0);
+	cl_lastServerAddress = Cvar_Get("cl_lastServerAddress", "", CVAR_ROM | CVAR_ARCHIVE);
 
 	cl_autoDownload = Cvar_Get ("cl_autoDownload", "1", CVAR_ARCHIVE);
 #if USE_CURL
@@ -2936,31 +2970,27 @@ void CL_Init( void ) {
 	cl_auth_engine = Cvar_Get( "cl_auth_engine", "1", CVAR_TEMP | CVAR_ROM);
 	cl_auth = Cvar_Get("cl_auth", "0", CVAR_TEMP | CVAR_ROM);
 	authc = Cvar_Get("authc", "0", CVAR_TEMP | CVAR_USERINFO);
+	authl = Cvar_Get("authl", "", CVAR_TEMP | CVAR_USERINFO);
 	#endif
 	
 	// userinfo
 	Cvar_Get ("name", "UnnamedPlayer", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("rate", "16000", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("snaps", "20", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("model", "sarge", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("headmodel", "sarge", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("team_model", "james", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("team_headmodel", "*james", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("g_redTeam", "Stroggs", CVAR_SERVERINFO | CVAR_ARCHIVE);
-	Cvar_Get ("g_blueTeam", "Pagans", CVAR_SERVERINFO | CVAR_ARCHIVE);
 	Cvar_Get ("color1",  "4", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("color2", "5", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("handicap", "100", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("teamtask", "0", CVAR_USERINFO );
 	Cvar_Get ("sex", "male", CVAR_USERINFO | CVAR_ARCHIVE );
-	Cvar_Get ("cl_anonymous", "0", CVAR_USERINFO | CVAR_ARCHIVE );
-
 	Cvar_Get ("password", "", CVAR_USERINFO);
-	Cvar_Get ("cg_predictItems", "1", CVAR_USERINFO | CVAR_ARCHIVE );
-
 
 	// cgame might not be initialized before menu is used
 	Cvar_Get ("cg_viewsize", "100", CVAR_ARCHIVE );
+
+	// Master servers
+	cl_masterServers[0] = Cvar_Get ("cl_master", MASTER_SERVER_NAME, CVAR_ARCHIVE );
+	cl_masterServers[1] = Cvar_Get ("cl_master1", MASTER_SERVER_NAME, CVAR_ARCHIVE );
+	cl_masterServers[2] = Cvar_Get ("cl_master2", MASTER2_SERVER_NAME, CVAR_ARCHIVE );
+	cl_masterServers[3] = Cvar_Get ("cl_master3", MASTER3_SERVER_NAME, CVAR_ARCHIVE );
 
 	//
 	// register our commands
@@ -3069,6 +3099,7 @@ static void CL_SetServerInfo(serverInfo_t *server, const char *info, int ping) {
 	if (server) {
 		if (info) {
 			server->clients = atoi(Info_ValueForKey(info, "clients"));
+			server->bots = atoi(Info_ValueForKey(info, "bots"));
 			Q_strncpyz(server->hostName,Info_ValueForKey(info, "hostname"), MAX_NAME_LENGTH);
 			Q_strncpyz(server->mapName, Info_ValueForKey(info, "mapname"), MAX_NAME_LENGTH);
 			server->maxClients = atoi(Info_ValueForKey(info, "sv_maxclients"));
@@ -3225,10 +3256,8 @@ CL_GetServerStatus
 ===================
 */
 serverStatus_t *CL_GetServerStatus( netadr_t from ) {
-	serverStatus_t *serverStatus;
 	int i, oldest, oldestTime;
 
-	serverStatus = NULL;
 	for (i = 0; i < MAX_SERVERSTATUSREQUESTS; i++) {
 		if ( NET_CompareAdr( from, cl_serverStatusList[i].address ) ) {
 			return &cl_serverStatusList[i];
@@ -3458,11 +3487,11 @@ CL_GlobalServers_f
 ==================
 */
 void CL_GlobalServers_f( void ) {
-	netadr_t	to;
-	int			i;
+	int			i, adrNum = 0;
 	int			count;
 	char		*buffptr;
 	char		command[1024];
+	static netadr_t	adr[CL_MAX_MASTER_SERVERS];
 	
 	if ( Cmd_Argc() < 3) {
 		Com_Printf( "usage: globalservers <master# 0-1> <protocol> [keywords]\n");
@@ -3473,21 +3502,45 @@ void CL_GlobalServers_f( void ) {
 
 	Com_Printf( "Requesting servers from the master...\n");
 
+	for ( adrNum = 0 ; adrNum < CL_MAX_MASTER_SERVERS ; adrNum++ ) {
+		if ( !cl_masterServers[adrNum]->string[0] ) {
+			continue;
+		}
+
+		if ( cl_masterServers[adrNum]->modified || !adr[adrNum].ip) {
+			cl_masterServers[adrNum]->modified = qfalse;
+	
+			Com_Printf( "Resolving %s\n", cl_masterServers[adrNum]->string );
+			if ( !NET_StringToAdr( cl_masterServers[adrNum]->string, &adr[adrNum] ) ) {
+				// if the address failed to resolve, clear it
+				// so we don't take repeated dns hits
+				Com_Printf( "Couldn't resolve address: %s\n", cl_masterServers[adrNum]->string );
+				Cvar_Set( cl_masterServers[adrNum]->name, "" );
+				cl_masterServers[adrNum]->modified = qfalse;
+				continue;
+			}
+		}
+		adr[adrNum].type = NA_IP;
+		if ( !strchr( cl_masterServers[adrNum]->string, ':' ) ) {
+			adr[adrNum].port = BigShort(PORT_MASTER);
+		}
+		Com_Printf( "%s resolved to %i.%i.%i.%i:%i\n", cl_masterServers[adrNum]->string,
+			adr[adrNum].ip[0], adr[adrNum].ip[1], adr[adrNum].ip[2], adr[adrNum].ip[3],
+			BigShort( adr[adrNum].port ) );
+
+		break;
+	}
+
 	// reset the list, waiting for response
 	// -1 is used to distinguish a "no response"
-
 	if( cls.masterNum == 1 ) {
-		NET_StringToAdr( cl_master->string, &to );
 		cls.nummplayerservers = -1;
 		cls.pingUpdateSource = AS_MPLAYER;
 	}
 	else {
-		NET_StringToAdr( cl_master->string, &to );
 		cls.numglobalservers = -1;
 		cls.pingUpdateSource = AS_GLOBAL;
 	}
-	to.type = NA_IP;
-	to.port = BigShort(PORT_MASTER);
 
 	sprintf( command, "getservers %s", Cmd_Argv(2) );
 
@@ -3502,7 +3555,7 @@ void CL_GlobalServers_f( void ) {
 		buffptr += sprintf( buffptr, " demo" );
 	}
 
-	NET_OutOfBandPrint( NS_SERVER, to, command );
+	NET_OutOfBandPrint( NS_SERVER, adr[adrNum], command );
 }
 
 

@@ -640,7 +640,7 @@ void Console_Key (int key) {
 
 	// command history (ctrl-p ctrl-n for unix style)
 
-	if ( (key == K_MWHEELUP && keys[K_SHIFT].down) || ( key == K_UPARROW ) || ( key == K_KP_UPARROW ) ||
+	if ( (key == K_MWHEELUP && keys[K_SHIFT].down) || ( key == K_UPARROW ) || ( key == K_KP_UPARROW && !keys[K_KP_NUMLOCK].down ) ||
 		 ( ( tolower(key) == 'p' ) && keys[K_CTRL].down ) ) {
 		if ( nextHistoryLine - historyLine < COMMAND_HISTORY 
 			&& historyLine > 0 ) {
@@ -650,7 +650,7 @@ void Console_Key (int key) {
 		return;
 	}
 
-	if ( (key == K_MWHEELDOWN && keys[K_SHIFT].down) || ( key == K_DOWNARROW ) || ( key == K_KP_DOWNARROW ) ||
+	if ( (key == K_MWHEELDOWN && keys[K_SHIFT].down) || ( key == K_DOWNARROW ) || ( key == K_KP_DOWNARROW && !keys[K_KP_NUMLOCK].down ) ||
 		 ( ( tolower(key) == 'n' ) && keys[K_CTRL].down ) ) {
 		historyLine++;
 		if (historyLine >= nextHistoryLine) {
@@ -701,6 +701,18 @@ void Console_Key (int key) {
 	// ctrl-end = bottom of console
 	if ( key == K_END && keys[K_CTRL].down ) {
 		Con_Bottom();
+		return;
+	}
+
+	// shift-right, console tabs: next tab
+	if ((key == K_RIGHTARROW && keys[K_SHIFT].down) || (key == K_MOUSE2)) {
+		Con_NextTab();
+		return;
+	}
+
+	// shift-left, console tabs: previous tab
+	if ((key == K_LEFTARROW && keys[K_SHIFT].down) || (key == K_MOUSE1)) {
+		Con_PrevTab();
 		return;
 	}
 
@@ -1232,6 +1244,10 @@ void CL_KeyEvent (int key, qboolean down, unsigned time) {
 			return;
 		}
 
+		if (cls.keyCatchers & KEYCATCH_RADIO) {
+			cls.keyCatchers &= ~KEYCATCH_RADIO;
+		}
+
 		if ( !( cls.keyCatchers & KEYCATCH_UI ) ) {
 			if ( cls.state == CA_ACTIVE && !clc.demoplaying ) {
 				VM_Call( uivm, UI_SET_ACTIVE_MENU, UIMENU_INGAME );
@@ -1268,6 +1284,11 @@ void CL_KeyEvent (int key, qboolean down, unsigned time) {
 		return;
 	}
 
+	if ((cls.keyCatchers & KEYCATCH_RADIO) && !(cls.keyCatchers & KEYCATCH_CONSOLE)) {
+		if (key >= '0' && key <= '9') {
+			return;
+		}
+	}
 
 	// distribute the key down event to the apropriate handler
 	if ( cls.keyCatchers & KEYCATCH_CONSOLE ) {
@@ -1296,6 +1317,7 @@ void CL_KeyEvent (int key, qboolean down, unsigned time) {
 			int i;
 			char button[1024], *buttonPtr;
 			buttonPtr = button;
+
 			for ( i = 0; ; i++ ) {
 				if ( kb[i] == ';' || !kb[i] ) {
 					*buttonPtr = '\0';
@@ -1336,6 +1358,9 @@ Normal keyboard characters, already shifted / capslocked / etc
 ===================
 */
 void CL_CharEvent( int key ) {
+	char *cbd;
+	int i, len;
+
 	// the console key should never be used as a char
 	if ( key == '`' || key == '~' ) {
 		return;
@@ -1354,7 +1379,30 @@ void CL_CharEvent( int key ) {
 	}
 	else if ( cls.keyCatchers & KEYCATCH_UI )
 	{
-		VM_Call( uivm, UI_KEY_EVENT, key | K_CHAR_FLAG, qtrue );
+		// support paste ctrl+v
+		if (key == 'v' - 'a' + 1) {
+
+		    cbd = Sys_GetClipboardData();
+
+		    if (!cbd) {
+		        // Fenix: on Linux copy&paste support works only
+		        // if xclip is installed on the system. If not
+		        // Sys_GetClipboardData will return NULL and the
+		        // following VM_Call will generate a segfault
+		        return;
+		    }
+
+		    len = strlen(cbd);
+
+			for (i = 0; i < len && i < MAX_STRING_CHARS; i++) {
+				if (Q_isprint(cbd[i])) {
+					VM_Call( uivm, UI_KEY_EVENT, cbd[i] | K_CHAR_FLAG, qtrue );
+				}
+			}
+
+		} else {
+			VM_Call( uivm, UI_KEY_EVENT, key | K_CHAR_FLAG, qtrue );
+		}
 	}
 	else if ( cls.keyCatchers & KEYCATCH_MESSAGE ) 
 	{

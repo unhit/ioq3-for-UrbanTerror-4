@@ -41,7 +41,7 @@ cvar_t *cl_cURLLib;
 #define SYMLOAD(x,y) GetProcAddress(x,y)
 #define OBJFREE(x) FreeLibrary(x)
 
-#elif defined __linux__ || defined __FreeBSD__ || defined MACOS_X || defined __sun
+#elif defined __linux__ || defined __FreeBSD__ || defined __OpenBSD__ || defined MACOS_X || defined __sun
 #include <dlfcn.h>
 #define OBJTYPE void *
 #define OBJLOAD(x) dlopen(x, RTLD_LAZY | RTLD_GLOBAL)
@@ -52,7 +52,7 @@ cvar_t *cl_cURLLib;
 #error "Your platform has no lib loading code or it is disabled"
 #endif
 
-#if defined __linux__ || defined __FreeBSD__ || defined MACOS_X
+#if defined __linux__ || defined __FreeBSD__ || defined __OpenBSD__ || defined MACOS_X
 #include <unistd.h>
 #include <sys/types.h>
 #endif
@@ -246,8 +246,11 @@ static int CL_cURL_CallbackWrite(void *buffer, size_t size, size_t nmemb,
 	return size*nmemb;
 }
 
-void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
+void CL_cURL_BeginDownload( const char *baseLocalName, const char *remoteURL )
 {
+	char localName[MAX_STRING_CHARS];
+	Com_sprintf(localName, sizeof(localName), "q3ut4/download/%s", COM_SkipPath(CopyString(baseLocalName)));
+
 	clc.cURLUsed = qtrue;
 	Com_Printf("URL: %s\n", remoteURL);
 	Com_DPrintf("***** CL_cURL_BeginDownload *****\n"

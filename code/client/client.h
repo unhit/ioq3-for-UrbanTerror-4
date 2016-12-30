@@ -252,6 +252,7 @@ typedef struct {
 	int			netType;
 	int			gameType;
 	int		  	clients;
+	int         bots;
 	int		  	maxClients;
 	int			minPing;
 	int			maxPing;
@@ -320,9 +321,19 @@ typedef struct {
 	qhandle_t	charSetShader;
 	qhandle_t	whiteShader;
 	qhandle_t	consoleShader;
+
+	fontInfo_t  font;
+	qboolean    fontFont;
 } clientStatic_t;
 
 extern	clientStatic_t		cls;
+
+typedef enum {
+	ITEM_TEXTSTYLE_NORMAL,
+	ITEM_TEXTSTYLE_SHADOWED,
+	ITEM_TEXTSTYLE_SHADOWEDLESS
+} textStyle_t;
+
 
 //=============================================================================
 
@@ -384,10 +395,14 @@ extern	cvar_t	*cl_altTab;
 extern  cvar_t	*cl_auth_engine;
 extern  cvar_t  *cl_auth;
 extern  cvar_t  *authc;
+extern  cvar_t  *authl; // Auth Login
 #endif
 
 extern  cvar_t  *cl_mouseAccelOffset;
 extern  cvar_t  *cl_mouseAccelStyle;
+
+#define CL_MAX_MASTER_SERVERS 4
+extern	cvar_t	*cl_masterServers[CL_MAX_MASTER_SERVERS];
 
 //=================================================
 
@@ -479,7 +494,6 @@ qboolean CL_UpdateVisiblePings_f( int source );
 //
 void Con_DrawCharacter (int cx, int line, int num);
 
-void Con_CheckResize (void);
 void Con_Init (void);
 void Con_Clear_f (void);
 void Con_ToggleConsole_f (void);
@@ -492,6 +506,9 @@ void Con_PageDown( void );
 void Con_Top( void );
 void Con_Bottom( void );
 void Con_Close( void );
+
+void Con_NextTab(void);
+void Con_PrevTab(void);
 
 void CL_LoadConsoleHistory( void );
 void CL_SaveConsoleHistory( void );
@@ -534,6 +551,9 @@ void CIN_SetExtents (int handle, int x, int y, int w, int h);
 void CIN_SetLooping (int handle, qboolean loop);
 void CIN_UploadCinematic(int handle);
 void CIN_CloseAllVideos(void);
+
+int     SCR_FontWidth(const char *text, float scale);
+void    SCR_DrawFontText(float x, float y, float scale, vec4_t color, const char *text, int style);
 
 //
 // cl_cgame.c

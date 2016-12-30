@@ -80,20 +80,20 @@ const char *COM_GetExtension( const char *name ) {
 COM_StripExtension
 ============
 */
-void COM_StripExtension( const char *in, char *out, int destsize ) {
-	int             length;
+void COM_StripExtension( const char *in, char *out, int destsize )
+{
+	const char *dot = strrchr(in, '.'), *slash;
 
-	Q_strncpyz(out, in, destsize);
-
-	length = strlen(out)-1;
-	while (length > 0 && out[length] != '.')
-	{
-		length--;
-		if (out[length] == '/')
-			return;		// no extension
+	if (dot && (!(slash = strrchr(in, '/')) || slash < dot)) {
+		destsize = (destsize < dot-in+1 ? destsize : dot-in+1);
 	}
-	if (length)
-		out[length] = 0;
+
+	if ( in == out && destsize > 1 ) {
+		out[destsize-1] = '\0';
+	} 
+	else {
+		Q_strncpyz(out, in, destsize);
+	}
 }
 
 
@@ -877,6 +877,76 @@ int Q_stricmp (const char *s1, const char *s2) {
 }
 
 
+////////////////////////////////////////////////////////////////////////
+// Name         : Q_strsub
+// Description  : Tells whether s2 is a substring of s1 (CASE SENSITIVE)
+// Author       : Fenix
+////////////////////////////////////////////////////////////////////////
+int Q_strsub (const char *s1, const char *s2) {
+
+    int i, j, match = 1;
+    int len1 = strlen(s1);
+    int len2 = strlen(s2);
+
+    // Check for proper input value
+    if ((!len2) || (!len1) || (len2 > len1)) {
+        return 0;
+    }
+
+    for(i = 0; i <= len1 - len2; i++) {
+
+        for(j = i; j < i + len2; j++) {
+            match = 1;
+            if (s1[j] != s2[j-i]) {
+                match = 0;
+                break;
+            }
+        }
+
+        // We got a substring
+        if (match == 1) break;
+   }
+
+   return match;
+
+}
+
+
+//////////////////////////////////////////////////////////////////////////
+// Name         : Q_strisub
+// Description  : Tells whether s2 is a substring of s1 (CASE INSENSITIVE)
+// Author       : Fenix
+//////////////////////////////////////////////////////////////////////////
+int Q_strisub (const char *s1, const char *s2) {
+
+    int i, j, match = 1;
+    int len1 = strlen(s1);
+    int len2 = strlen(s2);
+
+    // Check for proper input value
+    if ((!len2) || (!len1) || (len2 > len1)) {
+        return 0;
+    }
+
+    for(i = 0; i <= len1 - len2; i++) {
+
+        for(j = i; j < i + len2; j++) {
+            match = 1;
+            if (tolower(s1[j]) != tolower(s2[j-i])) {
+                match = 0;
+                break;
+            }
+        }
+
+        // We got a substring
+        if (match == 1) break;
+   }
+
+   return match;
+
+}
+
+
 char *Q_strlwr( char *s1 ) {
     char	*s;
 
@@ -1202,7 +1272,8 @@ void Info_RemoveKey( char *s, const char *key ) {
 
 		if (!strcmp (key, pkey) )
 		{
-			strcpy (start, s);	// remove this part
+			//strcpy is not safe for overlapping copies, use memmove
+			memmove(start, s, strlen(s) + 1);
 			return;
 		}
 
@@ -1257,7 +1328,8 @@ void Info_RemoveKey_Big( char *s, const char *key ) {
 
 		if (!strcmp (key, pkey) )
 		{
-			strcpy (start, s);	// remove this part
+			//strcpy is not safe for overlapping copies, use memmove
+			memmove(start, s, strlen(s) + 1);
 			return;
 		}
 

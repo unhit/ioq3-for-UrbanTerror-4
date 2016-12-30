@@ -2,7 +2,7 @@
 # Quake3 Unix Makefile
 #
 # Nov '98 by Zoid <zoid@idsoftware.com>
-# My God this Code is OLD -rjc
+#
 # Loki Hacking by Bernd Kreimeier
 #  and a little more by Ryan C. Gordon.
 #  and a little more by Rafael Barrero
@@ -38,9 +38,15 @@ USE_OPENAL       =0
 USE_CURL         =1
 USE_CODEC_VORBIS =0
 
+# Use SSE/SSE2 optimized code
+USE_SSE          =1
+
+# Clearskies - X11-based gamma for Linux
+USE_ALTGAMMA     =1
+
 # Barbatos - Urban Terror 4.2 auth system
 # You're not forced to use it.
-USE_AUTH		=1
+USE_AUTH         =1
 
 # Holblin - Urban Terror 4.2 file demo system
 USE_DEMO_FORMAT_42	=1
@@ -142,7 +148,7 @@ USE_LOCAL_HEADERS=1
 endif
 
 ifeq ($(PLATFORM),darwin)
-  BUILD_MACOSX_UB=i386
+  BUILD_MACOSX_UB=x86_64
 endif
 
 #############################################################################
@@ -238,17 +244,24 @@ ifeq ($(PLATFORM),linux)
   else
     BASE_CFLAGS += -I/usr/X11R6/include
   endif
- #Anything more then -O2 and *mmx *msse/2/ causes hitching with urbanterror also -march is illrelavent unless you know your target cpu
-  OPTIMIZE = -O2 -mmmx msse -msse2 
-#having x86_x64 implys having full SSE support up to SSE3 so we will use it for old cpus we don't care because anything pre Pentium 4/Althlon 1600+ won't run urt anyway no -mtune here because it misbehaves on nix
-  ifeq ($(ARCH),x86_64) 
-    OPTIMIZE = -O2 -msse  -msse -msse2 
+
+  ifeq ($(USE_ALTGAMMA), 1)
+  	BASE_CFLAGS += -DUSE_ALTGAMMA=1
+  endif
+
+  OPTIMIZE = -O3 -ffast-math -funroll-loops -fomit-frame-pointer
+
+  ifeq ($(ARCH),x86_64)
+    OPTIMIZE = -O3 -fomit-frame-pointer -ffast-math -funroll-loops \
+      -falign-loops=2 -falign-jumps=2 -falign-functions=2 \
+      -fstrength-reduce
     # experimental x86_64 jit compiler! you need GNU as
     HAVE_VM_COMPILED = true
   else
   ifeq ($(ARCH),i386)
-    OPTIMIZE = -O2 -mmmx 
-
+    OPTIMIZE = -O3 -march=i586 -fomit-frame-pointer -ffast-math \
+      -funroll-loops -falign-loops=2 -falign-jumps=2 \
+      -falign-functions=2 -fstrength-reduce
     HAVE_VM_COMPILED=true
   else
   ifeq ($(ARCH),ppc)
@@ -262,7 +275,7 @@ ifeq ($(PLATFORM),linux)
     BASE_CFLAGS += -DNO_VM_COMPILED
   endif
 
-  DEBUG_CFLAGS = $(BASE_CFLAGS) -g -O0 -wall
+  DEBUG_CFLAGS = $(BASE_CFLAGS) -g -O0
 
   RELEASE_CFLAGS=$(BASE_CFLAGS) -DNDEBUG $(OPTIMIZE)
 
@@ -275,6 +288,9 @@ ifeq ($(PLATFORM),linux)
 
   ifeq ($(USE_SDL),1)
     CLIENT_LDFLAGS=$(shell sdl-config --libs)
+    ifeq ($(USE_ALTGAMMA), 1)
+      CLIENT_LDFLAGS += -lX11 -lXxf86vm
+    endif
   else
     CLIENT_LDFLAGS=-L/usr/X11R6/$(LIB) -lX11 -lXext -lXxf86dga -lXxf86vm
   endif
@@ -338,19 +354,19 @@ ifeq ($(PLATFORM),darwin)
     # the -m linker flag, but you can't shut up the warnings
     USE_OPENAL_DLOPEN=1
   else
-  ifeq ($(BUILD_MACOSX_UB),i386)
+  ifeq ($(BUILD_MACOSX_UB),x86_64)
     CC=/Developer/usr/bin/gcc-4.2 # i686-apple-darwin10-gcc-4.2.1 (GCC) 4.2.1 (Apple Inc. build 5666) (dot 3) - from XCode 3.2.6, hacked install on a 10.7.4 OSX
-    BASE_CFLAGS += -arch i386 -DSMP \
+    BASE_CFLAGS += -arch x86_64 -DSMP \
       -mmacosx-version-min=10.5 -DMAC_OS_X_VERSION_MIN_REQUIRED=1050 \
       -nostdinc \
       -F/Developer/SDKs/MacOSX10.5.sdk/System/Library/Frameworks \
       -I/Developer/SDKs/MacOSX10.5.sdk/usr/lib/gcc/i686-apple-darwin10/4.2.1/include \
       -isystem /Developer/SDKs/MacOSX10.5.sdk/usr/include
-    LDFLAGS = -arch i386 -mmacosx-version-min=10.5 \
-      -L/Developer/SDKs/MacOSX10.5.sdk/usr/lib/gcc/i686-apple-darwin10/4.2.1 \
+    LDFLAGS = -arch x86_64 -mmacosx-version-min=10.5 \
+      -L/Developer/SDKs/MacOSX10.5.sdk/usr/lib/gcc/i686-apple-darwin10/4.2.1/x86_64 \
       -F/Developer/SDKs/MacOSX10.5.sdk/System/Library/Frameworks \
       -Wl,-syslibroot,/Developer/SDKs/MacOSX10.5.sdk
-    ARCH=i386
+    ARCH=x86_64
     BUILD_SERVER=0
   else
     # for whatever reason using the headers in the MacOSX SDKs tend to throw
@@ -362,13 +378,11 @@ ifeq ($(PLATFORM),darwin)
   endif
 
   ifeq ($(ARCH),ppc)
-    OPTIMIZE += -faltivec -O2
+    OPTIMIZE += -faltivec -O3
   endif
-  ifeq ($(ARCH),i386)
-    OPTIMIZE += -march=prescott -mfpmath=sse
-    # x86 vm will crash without -mstackrealign since MMX instructions will be
-    # used no matter what and they corrupt the frame pointer in VM calls
-    BASE_CFLAGS += -mstackrealign
+  ifeq ($(ARCH),x86_64)
+    OPTIMIZE += -O2 -march=core2 -fomit-frame-pointer -ffast-math -funroll-loops \
+      -falign-loops=2 -falign-jumps=2 -falign-functions=2
   endif
 
   BASE_CFLAGS += -fno-strict-aliasing -DMACOS_X -fno-common -pipe
@@ -413,8 +427,6 @@ ifeq ($(PLATFORM),darwin)
     #CLIENT_LDFLAGS += -L/usr/X11R6/$(LIB) -lX11 -lXext -lXxf86dga -lXxf86vm
   endif
 
-  OPTIMIZE += -ffast-math -falign-loops=16
-
   ifneq ($(HAVE_VM_COMPILED),true)
     BASE_CFLAGS += -DNO_VM_COMPILED
   endif
@@ -445,9 +457,9 @@ WINDRES=windres
 endif
 
   ARCH=x86
-#warnings are slow and ioquake 3 1.35 throws a fucktonn of them >>disabled unless are are compiling for debug
-  BASE_CFLAGS = -w
-#eventully lose the static libs please they cause all manner of evil
+
+  BASE_CFLAGS = -Wall -fno-strict-aliasing -Wimplicit -Wstrict-prototypes -DWINVER=0x0501
+
   ifeq ($(USE_OPENAL),1)
     BASE_CFLAGS += -DUSE_OPENAL=1 -DUSE_OPENAL_DLOPEN=1
   endif
@@ -462,11 +474,16 @@ endif
   ifeq ($(USE_CODEC_VORBIS),1)
     BASE_CFLAGS += -DUSE_CODEC_VORBIS=1
   endif
- #NoooooOOo //MARCH FLAGS are evil and so is -mtune and state the other flags manually anything after Althon  1600+/pentium 4 should have SSE3 support in a Ideal world we would do builds for Intel and AMD cpus 
-  OPTIMIZE = -O2  -mmmx -msse -msse2 
+
+  OPTIMIZE = -O2 -finline-functions -fweb -funit-at-a-time -funroll-loops -fpeel-loops -ffast-math
+  
+  ifeq ($(USE_SSE),1)
+    OPTIMIZE += -msse -msse2 -mfpmath=sse
+  endif
+
   HAVE_VM_COMPILED = true
 
-  DEBUG_CFLAGS=$(BASE_CFLAGS) -g -O0 -wall
+  DEBUG_CFLAGS=$(BASE_CFLAGS) -g -O0
 
   RELEASE_CFLAGS=$(BASE_CFLAGS) -DNDEBUG $(OPTIMIZE)
 
@@ -574,6 +591,103 @@ ifeq ($(PLATFORM),freebsd)
 
 
 else # ifeq freebsd
+
+#############################################################################
+# SETUP AND BUILD -- OPENBSD
+#############################################################################
+
+ifeq ($(PLATFORM),openbsd)
+
+  # Get the machine type
+  ARCH=$(shell uname -m)
+
+  BASE_CFLAGS = -Wall -fno-strict-aliasing -Wimplicit -Wstrict-prototypes
+
+  ifeq ($(USE_OPENAL),1)
+    BASE_CFLAGS += -DUSE_OPENAL
+    ifeq ($(USE_OPENAL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
+    endif
+  endif
+
+  ifeq ($(USE_CURL),1)
+    BASE_CFLAGS += -DUSE_CURL=1
+    ifeq ($(USE_CURL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_CURL_DLOPEN=1
+    endif
+  endif
+
+  ifeq ($(USE_CODEC_VORBIS),1)
+    BASE_CFLAGS += -DUSE_CODEC_VORBIS
+  endif
+
+  ifeq ($(USE_SDL),1)
+    BASE_CFLAGS += -DUSE_SDL_VIDEO=1 -DUSE_SDL_SOUND=1 \
+	$(shell pkg-config sdl --cflags)
+  else
+    BASE_CFLAGS += -I/usr/X11R6/include
+  endif
+
+  ifeq ($(USE_ALTGAMMA), 1)
+        BASE_CFLAGS += -DUSE_ALTGAMMA=1
+  endif
+
+  OPTIMIZE = -O2 -ffast-math -funroll-loops -fomit-frame-pointer
+
+  ifeq ($(ARCH),amd64)
+    HAVE_VM_COMPILED = true
+  else
+  ifeq ($(ARCH),i386)
+    HAVE_VM_COMPILED=true
+  else
+  ifeq ($(ARCH),ppc)
+    BASE_CFLAGS += -maltivec
+    HAVE_VM_COMPILED=false
+  endif
+  endif
+  endif
+
+  ifneq ($(HAVE_VM_COMPILED),true)
+    BASE_CFLAGS += -DNO_VM_COMPILED
+  endif
+
+  DEBUG_CFLAGS=$(BASE_CFLAGS) -g -O0
+
+  RELEASE_CFLAGS=$(BASE_CFLAGS) -DNDEBUG $(OPTIMIZE)
+
+  SHLIBEXT=so
+  SHLIBCFLAGS=-fPIC
+  SHLIBLDFLAGS=-shared $(LDFLAGS)
+
+  THREAD_LDFLAGS=-lpthread
+  LDFLAGS=-lm
+
+  ifeq ($(USE_SDL),1)
+    CLIENT_LDFLAGS=$(shell pkg-config sdl --libs)
+    ifeq ($(USE_ALTGAMMA), 1)
+      CLIENT_LDFLAGS += -lX11 -lXxf86vm
+    endif
+  else
+    CLIENT_LDFLAGS=-L/usr/X11R6/lib -lX11 -lXext -lXxf86dga -lXxf86vm
+  endif
+
+  ifeq ($(USE_OPENAL),1)
+    ifneq ($(USE_OPENAL_DLOPEN),1)
+      CLIENT_LDFLAGS += $(shell pkg-config openal --libs)
+    endif
+  endif
+
+  ifeq ($(USE_CURL),1)
+    ifneq ($(USE_CURL_DLOPEN),1)
+      CLIENT_LDFLAGS += -lcurl
+    endif
+  endif
+
+  ifeq ($(USE_CODEC_VORBIS),1)
+    CLIENT_LDFLAGS += -lvorbisfile -lvorbis -logg
+  endif
+
+else # ifeq openbsd
 
 #############################################################################
 # SETUP AND BUILD -- NETBSD
@@ -716,6 +830,7 @@ endif #Linux
 endif #darwin
 endif #mingw32
 endif #FreeBSD
+endif #OpenBSD
 endif #NetBSD
 endif #IRIX
 endif #SunOS
@@ -1085,15 +1200,23 @@ ifeq ($(ARCH),i386)
   Q3OBJ += \
     $(B)/client/snd_mixa.o \
     $(B)/client/matha.o \
-    $(B)/client/ftola.o \
-    $(B)/client/snapvectora.o
+    $(B)/client/ftola.o
+ifeq ($(USE_SSE),1)
+  Q3OBJ += $(B)/client/snapvector_sse.o
+else
+  Q3OBJ += $(B)/client/snapvectora.o
+endif
 endif
 ifeq ($(ARCH),x86)
   Q3OBJ += \
     $(B)/client/snd_mixa.o \
     $(B)/client/matha.o \
-    $(B)/client/ftola.o \
-    $(B)/client/snapvectora.o
+    $(B)/client/ftola.o
+ifeq ($(USE_SSE),1)
+  Q3OBJ += $(B)/client/snapvector_sse.o
+else
+  Q3OBJ += $(B)/client/snapvectora.o
+endif
 endif
 
 ifeq ($(HAVE_VM_COMPILED),true)
@@ -1104,6 +1227,9 @@ ifeq ($(HAVE_VM_COMPILED),true)
     Q3OBJ += $(B)/client/vm_x86.o
   endif
   ifeq ($(ARCH),x86_64)
+    Q3OBJ += $(B)/client/vm_x86_64.o $(B)/client/vm_x86_64_assembler.o
+  endif
+  ifeq ($(ARCH),amd64)
     Q3OBJ += $(B)/client/vm_x86_64.o $(B)/client/vm_x86_64_assembler.o
   endif
   ifeq ($(ARCH),ppc)
@@ -1142,12 +1268,15 @@ else
     endif
   endif
 
-  Q3POBJ = \
-    $(B)/client/linux_glimp.o \
+  ifneq ($(PLATFORM),openbsd)
+    Q3POBJ += \
+      $(B)/clientsmp/linux_glimp.o
+  endif
+
+  Q3POBJ += \
     $(B)/client/sdl_glimp.o
 
   Q3POBJ_SMP = \
-    $(B)/clientsmp/linux_glimp.o \
     $(B)/clientsmp/sdl_glimp.o
 endif
 
@@ -1256,14 +1385,22 @@ endif
 ifeq ($(ARCH),i386)
   Q3DOBJ += \
       $(B)/ded/ftola.o \
-      $(B)/ded/snapvectora.o \
       $(B)/ded/matha.o
+ifeq ($(USE_SSE),1)
+  Q3DOBJ += $(B)/ded/snapvector_sse.o
+else
+  Q3DOBJ += $(B)/ded/snapvectora.o
+endif
 endif
 ifeq ($(ARCH),x86)
   Q3DOBJ += \
       $(B)/ded/ftola.o \
-      $(B)/ded/snapvectora.o \
       $(B)/ded/matha.o
+ifeq ($(USE_SSE),1)
+  Q3DOBJ += $(B)/ded/snapvector_sse.o
+else
+  Q3DOBJ += $(B)/ded/snapvectora.o
+endif
 endif
 
 ifeq ($(HAVE_VM_COMPILED),true)
@@ -1274,6 +1411,9 @@ ifeq ($(HAVE_VM_COMPILED),true)
     Q3DOBJ += $(B)/ded/vm_x86.o
   endif
   ifeq ($(ARCH),x86_64)
+    Q3DOBJ += $(B)/ded/vm_x86_64.o $(B)/client/vm_x86_64_assembler.o
+  endif
+  ifeq ($(ARCH),amd64)
     Q3DOBJ += $(B)/ded/vm_x86_64.o $(B)/client/vm_x86_64_assembler.o
   endif
   ifeq ($(ARCH),ppc)

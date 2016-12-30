@@ -1,30 +1,24 @@
 /*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (c) 2010-2013  p5yc0runn3r at gmail.com
 
-This file is part of Quake III Arena source code.
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
 
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+   1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
 
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-===========================================================================
-*/
+   2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
 
-/*
-===========================================================================
-Changes to ID's source code: dmaHD HRTF Sound system
-by p5yc0runn3r founder of Armed, Pissed & Dangerous clan.
-===========================================================================
+   3. This notice may not be removed or altered from any source
+   distribution.
 */
 
 #ifndef NO_DMAHD
@@ -47,9 +41,6 @@ by p5yc0runn3r founder of Armed, Pissed & Dangerous clan.
 			int			vol; // Must be first member due to union (see channel_t)
 			int 		offset;
 			int 		bassvol;
-			int 		bassoffset;
-			int			reverbvol;
-			int			reverboffset;
 		} ch_side_t;
 
 		typedef struct
@@ -134,6 +125,7 @@ void S_UpdateBackgroundTrack(void);
 void S_GetSoundtime(void);
 qboolean S_ScanChannelStarts(void);
 
+
 // used in dmaEX mixer.
 #define							SOUND_FULLVOLUME		80
 #define							SOUND_ATTENUATE			0.0007f
@@ -160,11 +152,11 @@ extern sfx_t					s_knownSfx[];
 extern int						s_numSfx;
 
 extern cvar_t					*s_mixahead;
-extern cvar_t					*s_mixPreStep;
 cvar_t							*dmaHD_Enable = NULL;
 cvar_t							*dmaHD_Interpolation;
 cvar_t							*dmaHD_Mixer;
 cvar_t							*dmaEX_StereoSeparation;
+
 
 extern loopSound_t				loopSounds[];
 
@@ -186,7 +178,7 @@ float g_voltable[256];
 #define SMPCLAMP(a) (((a) < -32768) ? -32768 : ((a) > 32767) ? 32767 : (a))
 #define VOLCLAMP(a) (((a) < 0) ? 0 : ((a) > 255) ? 255 : (a))
 
-void dmaHD_InitTables()
+void dmaHD_InitTables(void)
 {
 	if (!g_tablesinit)
 	{
@@ -242,7 +234,7 @@ void dmaHD_FreeOldestSound( void )
 
 	Com_DPrintf("dmaHD_FreeOldestSound: freeing sound %s\n", sfx->soundName);
 
-	i = (sfx->soundLength + (sfx->soundLength >> 1)) * sizeof(short);
+	i = (sfx->soundLength * 2) * sizeof(short);
 	g_dmaHD_allocatedsoundmemory -= i;
 	if (g_dmaHD_allocatedsoundmemory < 0) g_dmaHD_allocatedsoundmemory = 0;
 	if ((buffer = (short*)sfx->soundData) != NULL) free(buffer);
@@ -293,13 +285,20 @@ static float dmaHD_InterpolateHermite4pt3oX(float x0, float x1, float x2, float 
     return (((((c3*t)+c2)*t)+c1)*t)+c0;
 }
 static float dmaHD_NormalizeSamplePosition(float t, int samples) {
-	while (t<0.0) t+=(float)samples; while (t>=(float)samples) t-=(float)samples; return t;
+	if (!samples) return t;
+	while (t<0.0) t+=(float)samples;
+	while (t>=(float)samples) t-=(float)samples;
+	return t;
 }
-static int dmaHD_GetSampleRaw_8bit(int index, int samples, byte* data) {
-	return (index < 0 || index >= samples) ? 0 : (int)(((byte)(data[index])-128)<<8);
+static int dmaHD_GetSampleRaw_8bit(int index, int samples, byte* data) 
+{
+	if (index < 0) index += samples; else if (index >= samples) index -= samples;
+	return (int)(((byte)(data[index])-128)<<8);
 }
-static int dmaHD_GetSampleRaw_16bit(int index, int samples, byte* data) {
-	return (index < 0 || index >= samples) ? 0 : (int)LittleShort(((short*)data)[index]);
+static int dmaHD_GetSampleRaw_16bit(int index, int samples, byte* data) 
+{
+	if (index < 0) index += samples; else if (index >= samples) index -= samples;
+	return (int)LittleShort(((short*)data)[index]);
 }
 
 // Get only decimal part (a - floor(a))
@@ -393,43 +392,44 @@ dmaHD_ResampleSfx
 resample / decimate to the current source rate
 ================
 */
-static void dmaHD_ResampleSfx( sfx_t *sfx, int inrate, int inwidth, byte *data, qboolean compressed) 
+void dmaHD_ResampleSfx( sfx_t *sfx, int inrate, int inwidth, byte *data, qboolean compressed) 
 {
 	short* buffer;
 	int (*dmaHD_GetSampleRaw)(int, int, byte*) = 
 		(inwidth == 2) ? dmaHD_GetSampleRaw_16bit : dmaHD_GetSampleRaw_8bit;
-	float stepscale, idx_smp, sample;
+	float stepscale, idx_smp, sample, bsample;
 	float lp_inva, lp_a, hp_a, lp_data, lp_last, hp_data, hp_last, hp_lastsample;
-	int outcount, idx_hp, bassoutcount, idx_lp;
+	int outcount, idx_hp, idx_lp;
 	
 	stepscale = (float)inrate/(float)dma.speed;
 	outcount = (int)((float)sfx->soundLength / stepscale);
-	// Always use even numbered length.
-	if ((outcount % 2) != 0) outcount += 1;
-	// Bass buffer output samples count
-	bassoutcount = (outcount / 2);
+
+
+
+
 
 	// Create secondary buffer for bass sound while performing lowpass filter;
-	buffer = dmaHD_AllocateSoundBuffer(outcount + bassoutcount);
+	buffer = dmaHD_AllocateSoundBuffer(outcount * 2);
 
 	// Check if this is a weapon sound.
 	sfx->weaponsound = (memcmp(sfx->soundName, "sound/weapons/", 14) == 0) ? qtrue : qfalse;
 
-	// Get first sample from sound effect.
-	idx_smp = 0.0;
+	// Get last sample from sound effect.
+	idx_smp = -(stepscale * 4.0f);
 	sample = dmaHD_GetInterpolatedSample(idx_smp, sfx->soundLength, data, dmaHD_GetSampleRaw);
+	bsample = dmaHD_GetNoInterpolationSample(idx_smp, sfx->soundLength, data, dmaHD_GetSampleRaw);
 	idx_smp += stepscale;
 
 	// Set up high pass filter.
 	idx_hp = 0;
 	hp_last = sample;
 	hp_lastsample = sample;
-	buffer[idx_hp++] = sample;
+	//buffer[idx_hp++] = sample;
 	hp_a = 0.95f;
 
 	// Set up Low pass filter.
 	idx_lp = outcount;
-	lp_last = sample;
+	lp_last = bsample;
 	lp_a = 0.03f;
 	lp_inva = (1 - lp_a);
 
@@ -437,6 +437,7 @@ static void dmaHD_ResampleSfx( sfx_t *sfx, int inrate, int inwidth, byte *data, 
 	for (;idx_hp < outcount; idx_hp++)
 	{ 
 		sample = dmaHD_GetInterpolatedSample(idx_smp, sfx->soundLength, data, dmaHD_GetSampleRaw);
+		bsample = dmaHD_GetNoInterpolationSample(idx_smp, sfx->soundLength, data, dmaHD_GetSampleRaw);
 		idx_smp += stepscale;
 
 		// High pass.
@@ -446,34 +447,51 @@ static void dmaHD_ResampleSfx( sfx_t *sfx, int inrate, int inwidth, byte *data, 
 		hp_lastsample = sample;
 
 		// Low pass.
-		lp_data = lp_a * (float)sample + lp_inva * lp_last;
-		if ((idx_hp % 2) != 0) buffer[idx_lp++] = SMPCLAMP((lp_last + lp_data) / 2.0f);
+		lp_data = lp_a * (float)bsample + lp_inva * lp_last;
+		buffer[idx_lp++] = SMPCLAMP(lp_data);
 		lp_last = lp_data;
 	}
 	
 	sfx->soundData = (sndBuffer*)buffer;
 	sfx->soundLength = outcount;
 }
-
 //=============================================================================
 
 qboolean dmaHD_LoadSound(sfx_t *sfx)
 {
 	byte *data;
 	snd_info_t info;
+	char dmahd_soundName[MAX_QPATH];
+	char *lpext;
 
 	// Player specific sounds are never directly loaded.
 	if (sfx->soundName[0] == '*') return qfalse;
 
-	// Load it in.
-	if (!(data = S_CodecLoad(sfx->soundName, &info))) return qfalse;
+	strcpy(dmahd_soundName, sfx->soundName);
+	if ((lpext = strrchr(sfx->soundName, '.')) != NULL)
+	{
+		strcpy(dmahd_soundName, sfx->soundName);
+		*(strrchr(dmahd_soundName, '.')) = '\0'; // for sure there is a '.'
+	}
+	strcat(dmahd_soundName, "_dmahd");
+	if (lpext != NULL) strcat(dmahd_soundName, lpext);
+
+	// Just check if file exists
+	if (FS_FOpenFileRead(dmahd_soundName, NULL, qtrue) == qtrue)
+	{
+		// Load it in.
+		if (!(data = S_CodecLoad(dmahd_soundName, &info))) return qfalse;
+	}
+	else
+	{
+		// Load it in.
+		if (!(data = S_CodecLoad(sfx->soundName, &info))) return qfalse;
+	}
 
 	// Information
-	Com_DPrintf("^3Loading sound: ^7%s", sfx->soundName);
-	if (info.width == 1) 
-		Com_DPrintf(" [^28^3bit ^7-> ^216^3bit]", sfx->soundName);
-	if (info.rate != dma.speed) 
-		Com_DPrintf(" [^2%d^3Hz ^7-> ^2%d^3Hz]", info.rate, dma.speed);
+	Com_DPrintf("Loading sound: %s", sfx->soundName);
+	if (info.width == 1) Com_DPrintf(" [8 bit -> 16 bit]");
+	if (info.rate != dma.speed) Com_DPrintf(" [%d Hz -> %d Hz]", info.rate, dma.speed);
 	Com_DPrintf("\n");
 
 	sfx->lastTimeUsed = Com_Milliseconds() + 1;
@@ -492,223 +510,151 @@ qboolean dmaHD_LoadSound(sfx_t *sfx)
 
 /*
 ===============================================================================
-PART#02: dmaHD: dma sound EXtension : Mixing
+PART#02: dmaHD: Mixing
 ===============================================================================
 */
 
 static void dmaHD_PaintChannelFrom16_HHRTF(channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset, int chan) 
 {
-	int data, vol, i, so, c, len;
+	int vol, i, so;
 	portable_samplepair_t *samp = &dmaHD_paintbuffer[bufferOffset];
-	int* rawsamps;
 	short *samples;
+	short *tsamples;
+	int *out;
 	ch_side_t* chs = (chan == 0) ? &ch->l : &ch->r;
 
 	if (dmaHD_snd_vol <= 0) return;
 
-	if (chs->bassvol > 0)
+	so = sampleOffset - chs->offset;
+	if (so < 0) { count += so; so = 0; } // [count -= (-so)] == [count += so]
+	if ((so + count) >= sc->soundLength) count = sc->soundLength - so;
+	if (count <= 0) return;
+	if (chs->bassvol > 0) // Process low frequency
 	{
-		// Process low frequency
 		samples = &((short*)sc->soundData)[sc->soundLength]; // Select bass frequency offset (just after high frequency)
-		len = sc->soundLength >> 1; // Divide length by 2
-		so = (sampleOffset - chs->bassoffset) >> 1;
-		c = count >> 1;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
-		{
-			// Calculate volumes.
-			vol = chs->bassvol * dmaHD_snd_vol;
-
-			rawsamps = (int*)samp; rawsamps += chan;
-			for (i = 0; i < c; i++) 
-			{ 
-				data = (samples[so++] * vol) >> 8;
-				*rawsamps += data; rawsamps += 2; 
-				*rawsamps += data; rawsamps += 2; 
-			}
+		// Calculate volumes.
+		vol = chs->bassvol * dmaHD_snd_vol;
+		tsamples = &samples[so];
+		out = (int*)samp;
+		if (chan == 1) out++;
+		for (i = 0; i < count; i++) {
+			*out += (*tsamples * vol) >> 8; ++tsamples; ++out; ++out;
 		}
 	}
-
-	if (chs->vol > 0)
+	if (chs->vol > 0) // Process high frequency
 	{
-		// Process high frequency.
 		samples = (short*)sc->soundData; // Select high frequency offset.
-		len = sc->soundLength;
-		so = sampleOffset - chs->offset;
-		c = count;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
-		{
-			// Calculate volumes.
-			vol = chs->vol * dmaHD_snd_vol;
-
-			rawsamps = (int*)samp; rawsamps += chan;
-			for (i = 0; i < c; i++) { *rawsamps += (samples[so++] * vol) >> 8; rawsamps += 2; }
+		// Calculate volumes.
+		vol = chs->vol * dmaHD_snd_vol;
+		tsamples = &samples[so];
+		out = (int*)samp;
+		if (chan == 1) out++;
+		for (i = 0; i < count; i++) {
+			*out += (*tsamples * vol) >> 8; ++tsamples; ++out; ++out;
 		}
 	}
 }
 
 static void dmaHD_PaintChannelFrom16_dmaEX2(channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset) 
 {
-	int data, rvol, lvol, i, j, so, c, len;
+	int data, rvol, lvol, i, so;
 	portable_samplepair_t *samp = &dmaHD_paintbuffer[bufferOffset];
 	short *samples;
+	short *tsamples;
+	int *out;
 
 	if (dmaHD_snd_vol <= 0) return;
 
-	if (ch->l.bassvol > 0)
+	so = sampleOffset - ch->l.offset;
+	if (so < 0) { count += so; so = 0; } // [count -= (-so)] == [count += so]
+	if ((so + count) > sc->soundLength) count = sc->soundLength - so;
+	if (count <= 0) return;
+
+	if (ch->l.bassvol > 0) // Process low frequency.
 	{
-		// Process low frequency.
 		samples = &((short*)sc->soundData)[sc->soundLength]; // Select bass frequency offset (just after high frequency)
-		len = sc->soundLength >> 1; // Divide length by 2
-		so = (sampleOffset - ch->l.offset) >> 1;
-		c = count >> 1;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
-		{
-			// Calculate volumes.
-			lvol = ch->l.bassvol * dmaHD_snd_vol;
-
-			//#pragma omp parallel for private(data, j)
-			for (i = 0; i < c; i++) 
-			{ 
-				data = (samples[so + i] * lvol) >> 8;
-				j = (i << 1);
-				samp[j].left += data;
-				samp[j].right += data;
-				samp[j + 1].left += data;
-				samp[j + 1].right += data;
-			}
+		// Calculate volumes.
+		lvol = ch->l.bassvol * dmaHD_snd_vol;
+		tsamples = &samples[so];
+		out = (int*)samp;
+		for (i = 0; i < count; i++) 
+		{ 
+			data = (*tsamples * lvol) >> 8; ++tsamples;
+			*out += data; ++out; // L
+			*out += data; ++out; // R
 		}
 	}
-	
-	if (ch->l.vol > 0 || ch->r.vol > 0)
+	if (ch->l.vol > 0 || ch->r.vol > 0) // Process high frequency.
 	{
-		// Process high frequency.
 		samples = (short*)sc->soundData; // Select high frequency offset.
-		len = sc->soundLength;
-		so = sampleOffset - ch->l.offset;
-		c = count;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
+		// Calculate volumes.
+		lvol = ch->l.vol * dmaHD_snd_vol;
+		rvol = ch->r.vol * dmaHD_snd_vol;
+		// Behind viewer?
+		if (ch->fixed_origin && ch->sodrot[0] < 0)
 		{
-			// Calculate volumes.
-			lvol = ch->l.vol * dmaHD_snd_vol;
-			rvol = ch->r.vol * dmaHD_snd_vol;
-
-			// Behind viewer?
-			if (ch->fixed_origin && ch->sodrot[0] < 0) 
-			{
-				if (ch->r.vol > ch->l.vol) lvol = -lvol;
-				else rvol = -rvol;
-			}
-
-			//#pragma omp parallel for
-			for (i = 0; i < c; i++)
-			{ 
-				samp[i].left += (samples[so + i] * lvol) >> 8;
-				samp[i].right += (samples[so + i] * rvol) >> 8;
-			}
+			if (ch->r.vol > ch->l.vol) lvol = -lvol; else rvol = -rvol;
+		}
+		tsamples = &samples[so];
+		out = (int*)samp;
+		for (i = 0; i < count; i++)
+		{ 
+			*out += (*tsamples * lvol) >> 8; ++out; // L
+			*out += (*tsamples * rvol) >> 8; ++out; // R
+			++tsamples;
 		}
 	}
-
-	// Process high frequency reverb.
-	if (ch->l.reverbvol > 0 || ch->r.reverbvol > 0)
+	if (ch->l.reverbvol > 0 || ch->r.reverbvol > 0) // Process high frequency reverb.
 	{
 		samples = (short*)sc->soundData; // Select high frequency offset.
-		len = sc->soundLength;
 		so = sampleOffset - ch->l.reverboffset;
-		c = count;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
-		{
-			// Calculate volumes for reverb.
-			lvol = ch->l.reverbvol * dmaHD_snd_vol;
-			rvol = ch->r.reverbvol * dmaHD_snd_vol;
-
-			//#pragma omp parallel for
-			for (i = 0; i < c; i++)
-			{ 
-				samp[i].left += (samples[so + i] * lvol) >> 8;
-				samp[i].right += (samples[so + i] * rvol) >> 8;
-			}
+		if (so < 0) { count += so; so = 0; } // [count -= (-so)] == [count += so]
+		if ((so + count) > sc->soundLength) count = sc->soundLength - so;
+		// Calculate volumes for reverb.
+		lvol = ch->l.reverbvol * dmaHD_snd_vol;
+		rvol = ch->r.reverbvol * dmaHD_snd_vol;
+		tsamples = &samples[so];
+		out = (int*)samp;
+		for (i = 0; i < count; i++)
+		{ 
+			*out += (*tsamples * lvol) >> 8; ++out; // L
+			*out += (*tsamples * rvol) >> 8; ++out; // R
+			++tsamples;
 		}
 	}
 }
 
 static void dmaHD_PaintChannelFrom16_dmaEX(channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset) 
 {
-	int ldata, rdata, rvol, lvol, i, j, so, c, len;
+	int rvol, lvol, i, so;
 	portable_samplepair_t *samp = &dmaHD_paintbuffer[bufferOffset];
-	short *samples;
+	short *samples, *bsamples;
+	int *out;
 
 	if (dmaHD_snd_vol <= 0) return;
 
-	if (ch->l.vol > 0 || ch->r.vol > 0)
+	so = sampleOffset - ch->l.offset;
+	if (so < 0) { count += so; so = 0; } // [count -= (-so)] == [count += so]
+	if ((so + count) > sc->soundLength) count = sc->soundLength - so;
+	if (count <= 0) return;
+	if (ch->l.vol <= 0 && ch->r.vol <= 0) return;
+
+	samples = &((short*)sc->soundData)[so]; // Select high frequency offset.
+	bsamples = &((short*)sc->soundData)[sc->soundLength + so]; // Select bass frequency offset (just after high frequency)
+	// Calculate volumes.
+	lvol = ch->l.vol * dmaHD_snd_vol;
+	rvol = ch->r.vol * dmaHD_snd_vol;
+	// Behind viewer?
+	if (ch->fixed_origin && ch->sodrot[0] < 0) 
 	{
-		// Process low frequency.
-		samples = &((short*)sc->soundData)[sc->soundLength]; // Select bass frequency offset (just after high frequency)
-		len = sc->soundLength >> 1; // Divide length by 2
-		so = (sampleOffset - ch->l.offset) >> 1;
-		c = count >> 1;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
-		{
-			// Calculate volumes.
-			lvol = ch->l.vol * dmaHD_snd_vol;
-			rvol = ch->r.vol * dmaHD_snd_vol;
-
-			// Behind viewer?
-			if (ch->fixed_origin && ch->sodrot[0] < 0) 
-			{
-				if (lvol < rvol) lvol = -lvol; else rvol = -rvol;
-			}
-
-			//#pragma omp parallel for private(ldata, rdata, j)
-			for (i = 0; i < c; i++) 
-			{ 
-				ldata = (samples[so + i] * lvol) >> 8;
-				rdata = (samples[so + i] * rvol) >> 8;
-				j = (i << 1);
-				samp[j].left += ldata;
-				samp[j].right += rdata;
-				samp[j + 1].left += ldata;
-				samp[j + 1].right += rdata;
-			}
-		}
-
-		// Process high frequency.
-		samples = (short*)sc->soundData; // Select high frequency offset.
-		len = sc->soundLength;
-		so = sampleOffset - ch->l.offset;
-		c = count;
-		if (so < 0) { c += so; so = 0; } // [c -= (-so)] == [c += so]
-		if ((so + c) > len) c = len - so;
-		if (c > 0)
-		{
-			// Calculate volumes.
-			lvol = ch->l.vol * dmaHD_snd_vol;
-			rvol = ch->r.vol * dmaHD_snd_vol;
-
-			// Behind viewer?
-			if (ch->fixed_origin && ch->sodrot[0] < 0) 
-			{
-				if (lvol < rvol) lvol = -lvol; else rvol = -rvol;
-			}
-
-			//#pragma omp parallel for
-			for (i = 0; i < c; i++)
-			{ 
-				samp[i].left += (samples[so + i] * lvol) >> 8;
-				samp[i].right += (samples[so + i] * rvol) >> 8;
-			}
-		}
+		if (lvol < rvol) lvol = -lvol; else rvol = -rvol;
+	}
+	out = (int*)samp;
+	for (i = 0; i < count; i++) 
+	{ 
+		*out += ((*samples * lvol) >> 8) + ((*bsamples * lvol) >> 8); ++out; // L
+		*out += ((*samples * rvol) >> 8) + ((*bsamples * rvol) >> 8); ++out; // R
+		++samples; ++bsamples;
 	}
 }
 
@@ -716,20 +662,11 @@ static void dmaHD_PaintChannelFrom16(channel_t *ch, const sfx_t *sc, int count, 
 {
 	switch (dmaHD_Mixer->integer)
 	{
-	// HHRTF
+	// Hybrid-HRTF
 	case 10:
 	case 11:
-		//#pragma omp parallel sections
-		{
-			//#pragma omp section
-			{
-				dmaHD_PaintChannelFrom16_HHRTF(ch, sc, count, sampleOffset, bufferOffset, 0); // LEFT
-			}
-			//#pragma omp section
-			{
-				dmaHD_PaintChannelFrom16_HHRTF(ch, sc, count, sampleOffset, bufferOffset, 1); // RIGHT
-			}
-		}
+		dmaHD_PaintChannelFrom16_HHRTF(ch, sc, count, sampleOffset, bufferOffset, 0); // LEFT
+		dmaHD_PaintChannelFrom16_HHRTF(ch, sc, count, sampleOffset, bufferOffset, 1); // RIGHT
 		break;
 	// dmaEX2
 	case 20:
@@ -784,8 +721,8 @@ void dmaHD_TransferPaintBuffer(int endtime)
 
 		ls_paintedtime += (snd_linear_count>>1);
 
-		if( CL_VideoRecording( ) )
-			CL_WriteAVIAudioFrame( (byte *)snd_out, snd_linear_count << 1 );
+		if (CL_VideoRecording())
+			CL_WriteAVIAudioFrame((byte *)snd_out, snd_linear_count << 1);
 	}
 }
 
@@ -802,17 +739,16 @@ void dmaHD_PaintChannels( int endtime )
 #endif
 
 	dmaHD_snd_vol = 
-#ifdef MAX_RAW_STREAMS // For using Mitsu's build...
+#ifdef MAX_RAW_STREAMS
 		(s_muted->integer) ? 0 : 
 #endif
 		s_volume->value*256;
 
 	while ( s_paintedtime < endtime ) 
 	{
-		// if paintbuffer is smaller than DMA buffer
-		// we may need to fill it multiple times
+		// if paintbuffer is smaller than DMA buffer we may need to fill it multiple times
 		end = endtime;
-		if ( endtime - s_paintedtime > DMAHD_PAINTBUFFER_SIZE ) 
+		if ((endtime - s_paintedtime) >= DMAHD_PAINTBUFFER_SIZE ) 
 		{
 			end = s_paintedtime + DMAHD_PAINTBUFFER_SIZE;
 		}
@@ -873,6 +809,7 @@ void dmaHD_PaintChannels( int endtime )
 			sc = ch->thesfx;
 			sampleOffset = ltime - ch->startSample;
 			count = end - ltime;
+			if (sampleOffset + count >= sc->soundLength) count = sc->soundLength - sampleOffset;
 			if (count > 0) dmaHD_PaintChannelFrom16(ch, sc, count, sampleOffset, 0);
 		}
 
@@ -891,6 +828,7 @@ void dmaHD_PaintChannels( int endtime )
 			{
 				sampleOffset = (ltime % sc->soundLength);
 				count = end - ltime;
+				if (sampleOffset + count >= sc->soundLength) count = sc->soundLength - sampleOffset;
 				if (count > 0) 
 				{	
 					dmaHD_PaintChannelFrom16(ch, sc, count, sampleOffset, ltime - s_paintedtime);
@@ -907,7 +845,7 @@ void dmaHD_PaintChannels( int endtime )
 
 /*
 ===============================================================================
-PART#03: dmaHD: dma sound EXtension : main
+PART#03: dmaHD: main
 ===============================================================================
 */
 
@@ -938,7 +876,7 @@ Used for spatializing s_channels
 			(((idx = (dist / iattenuation)) > 255) ? 255 : idx)])) < 0) ? 0 : tmp)
 #define CALCSMPOFF(dist) (dist * dma.speed) >> ismpshift
 
-void dmaHD_SpatializeOrigin_HHRTF(vec3_t so, channel_t* ch, qboolean b3d)
+void dmaHD_SpatializeOrigin_HHRTF(vec3_t so, channel_t* ch)
 {
 	// so = sound origin/[d]irection/[n]ormalized/[rot]ated/[d]irection [l]eft/[d]irection [r]ight
 	vec3_t sod, sodl, sodr;
@@ -975,8 +913,8 @@ void dmaHD_SpatializeOrigin_HHRTF(vec3_t so, channel_t* ch, qboolean b3d)
 	distr = (int)VectorNormalize(sodr); // right
 	
 	// Close enough to be at full volume?
-	if (distl < 0) distl = 0; // left
-	if (distr < 0) distr = 0; // right
+	if (distl < 80) distl = 0; // left
+	if (distr < 80) distr = 0; // right
 
 	// Distance 384units = 1m
 	// 340.29m/s (speed of sound at sea level)
@@ -988,41 +926,42 @@ void dmaHD_SpatializeOrigin_HHRTF(vec3_t so, channel_t* ch, qboolean b3d)
 	// 384.0 * 1484 = 569856
 	// Most similar is 2 ^ 19 = 524288; so shift right by 19 to divide by 524288
 
-	ch->l.bassoffset = ch->l.offset = CALCSMPOFF(distl); // left
-	ch->r.bassoffset = ch->r.offset = CALCSMPOFF(distr); // right
+	ch->l.offset = CALCSMPOFF(distl); // left
+	ch->r.offset = CALCSMPOFF(distr); // right
 	// Calculate volume at ears
 	ch->l.bassvol = ch->l.vol = CALCVOL(distl); // left
 	ch->r.bassvol = ch->r.vol = CALCVOL(distr); // right
 
-	// Sound originating from inside head of left ear (i.e. from right)
-	if (ch->sodrot[1] < 0) ch->l.vol *= (1.0 + (ch->sodrot[1] * 0.7f));
-	// Sound originating from inside head of right ear (i.e. from left)
-	if (ch->sodrot[1] > 0) ch->r.vol *= (1.0 - (ch->sodrot[1] * 0.7f));
-
-	// Calculate HRTF function (lowpass filter) parameters
-	//if (ch->fixed_origin)
+	if (distl != 0 || distr != 0)
 	{
-		// Sound originating from behind viewer
-		if (ch->sodrot[0] < 0) 
+		// Sound originating from inside head of left ear (i.e. from right)
+		if (ch->sodrot[1] < 0) ch->l.vol *= (1.0 + (ch->sodrot[1] * 0.7f));
+		// Sound originating from inside head of right ear (i.e. from left)
+		if (ch->sodrot[1] > 0) ch->r.vol *= (1.0 - (ch->sodrot[1] * 0.7f));
+
+		// Calculate HRTF function (lowpass filter) parameters
+		//if (ch->fixed_origin)
 		{
-			ch->l.vol *= (1.0 + (ch->sodrot[0] * 0.05f));
-			ch->r.vol *= (1.0 + (ch->sodrot[0] * 0.05f));
-			// 2ms max
-			//t = -ch->sodrot[0] * 0.04f; if (t > 0.005f) t = 0.005f;
-			t = (dma.speed * 0.001f);
-			ch->l.offset -= t;
-			ch->r.offset += t;
-			ch->l.bassoffset -= t;
-			ch->r.bassoffset += t;
+			// Sound originating from behind viewer
+			if (ch->sodrot[0] < 0) 
+			{
+				ch->l.vol *= (1.0 + (ch->sodrot[0] * 0.05f));
+				ch->r.vol *= (1.0 + (ch->sodrot[0] * 0.05f));
+				// 2ms max
+				//t = -ch->sodrot[0] * 0.04f; if (t > 0.005f) t = 0.005f;
+				t = (dma.speed * 0.001f);
+				ch->l.offset -= t;
+				ch->r.offset += t;
+			}
 		}
-	}
 
-	if (b3d)
-	{
-		// Sound originating from above viewer (decrease bass)
-		// Sound originating from below viewer (increase bass)
-		ch->l.bassvol *= ((1 - ch->sodrot[2]) * 0.5);
-		ch->r.bassvol *= ((1 - ch->sodrot[2]) * 0.5);
+		if (dmaHD_Mixer->integer == 10)
+		{
+			// Sound originating from above viewer (decrease bass)
+			// Sound originating from below viewer (increase bass)
+			ch->l.bassvol *= ((1 - ch->sodrot[2]) * 0.5);
+			ch->r.bassvol *= ((1 - ch->sodrot[2]) * 0.5);
+		}
 	}
 	// Normalize volume
 	ch->l.vol *= 0.5;
@@ -1155,8 +1094,8 @@ void dmaHD_SpatializeOrigin_dmaEX(vec3_t origin, channel_t* ch)
 
 	rscale = 0.5 * (1.0 + dot);
 	lscale = 0.5 * (1.0 - dot);
-	if ( rscale < 0 ) rscale = 0;
-	if ( lscale < 0 ) lscale = 0;
+	if (rscale < 0) rscale = 0;
+	if (lscale < 0) lscale = 0;
 
 	// add in distance effect
 	scale = (1.0 - dist) * rscale;
@@ -1175,8 +1114,8 @@ void dmaHD_SpatializeOrigin(vec3_t so, channel_t* ch)
 	switch(dmaHD_Mixer->integer)
 	{
 	// HHRTF
-	case 10: dmaHD_SpatializeOrigin_HHRTF(so, ch, qtrue); break;
-	case 11: dmaHD_SpatializeOrigin_HHRTF(so, ch, qfalse); break;
+	case 10:
+	case 11: dmaHD_SpatializeOrigin_HHRTF(so, ch); break;
 	// dmaEX2
 	case 20:
 	case 21: dmaHD_SpatializeOrigin_dmaEX2(so, ch); break;
@@ -1200,7 +1139,7 @@ All sounds are on the same cycle, so any duplicates can just
 sum up the channel multipliers.
 ==================
 */
-void dmaHD_AddLoopSounds () 
+void dmaHD_AddLoopSounds (void) 
 {
 	int			i, time;
 	channel_t	*ch;
@@ -1237,8 +1176,6 @@ void dmaHD_AddLoopSounds ()
 		ch->r.vol = VOLCLAMP(ch->r.vol);
 		ch->l.bassvol = VOLCLAMP(ch->l.bassvol);
 		ch->r.bassvol = VOLCLAMP(ch->r.bassvol);
-		ch->l.reverbvol = VOLCLAMP(ch->l.reverbvol);
-		ch->r.reverbvol = VOLCLAMP(ch->r.reverbvol);
 		ch->thesfx = loop->sfx;
 		ch->doppler = qfalse;
 		
@@ -1291,13 +1228,13 @@ void dmaHD_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], int i
 			ch->r.bassvol = ch->master_vol;
 			switch(dmaHD_Mixer->integer)
 			{
-			case 10: case 11: case 20: case 21:
-				if (dmaHD_inwater)
-				{
-					ch->l.vol *= 0.2;
-					ch->r.vol *= 0.2;
-				}
-				break;
+				case 10: case 11: case 20: case 21:
+					if (dmaHD_inwater)
+					{
+						ch->l.vol *= 0.2;
+						ch->r.vol *= 0.2;
+					}
+					break;
 			}
 		} 
 		else 
@@ -1351,10 +1288,11 @@ void dmaHD_Update_Mix(void)
 	// and start any new sounds
 	S_ScanChannelStarts();
 
-	if ((sane = thisTime - lastTime) < 1) sane = 1;
+	if ((sane = thisTime - lastTime) < 8) sane = 8; // ms since last mix (cap to 8ms @ 125fps)
+	op = (int)((float)(dma.speed * sane) * 0.001); // samples to mix based on last mix time
 	mixahead = (int)((float)dma.speed * s_mixahead->value);
-	op = (int)((float)(dma.speed * sane) * 0.01);
-	if (op < mixahead) mixahead = op;
+	
+	if (mixahead < op) mixahead = op;
 	
 	// mix ahead of current position
 	endtime = s_soundtime + mixahead;
@@ -1377,10 +1315,10 @@ void dmaHD_Update_Mix(void)
 dmaHD_Enabled
 ================
 */
-qboolean dmaHD_Enabled() 
+qboolean dmaHD_Enabled(void) 
 {
 	if (dmaHD_Enable == NULL)
-		dmaHD_Enable = Cvar_Get("dmaHD_enable", "1", CVAR_ARCHIVE);
+		dmaHD_Enable = Cvar_Get("dmaHD_enable", "1", CVAR_ARCHIVE); //@p5yc0runn3r- Turn on by default
 
 	return (dmaHD_Enable->integer);
 }
@@ -1388,51 +1326,35 @@ qboolean dmaHD_Enabled()
 // ====================================================================
 // User-setable variables
 // ====================================================================
-
 void dmaHD_SoundInfo(void) 
 {	
-	int i;
-	for (i = 0; i < 19; i++) Com_Printf("^7-^6-" );
 	Com_Printf("\n" );
-	Com_Printf("^2p5yc0runn3r's ^3dma^1HD ^7sound information\n");
+	Com_Printf("dmaHD 3D software sound engine by p5yc0runn3r\n");
 	
 	if (!s_soundStarted) 
 	{
-		Com_Printf ("  ^1Sound system not started...\n");
+		Com_Printf (" Engine not started.\n");
 	} 
 	else 
 	{
-		Com_Printf("  ^3dma^1HD ^7Mixer ^3type: ^2%d", dmaHD_Mixer->integer);
-		switch (dmaHD_Mixer->integer / 10)
+		switch (dmaHD_Mixer->integer)
 		{
-			case 1: Com_Printf(" ^7- ^2Hybrid^7-^2HRTF"); 
-				switch (dmaHD_Mixer->integer % 10)
-				{
-					case 0: Com_Printf(" ^0[^63D^0]"); break;
-					case 1: Com_Printf(" ^0[^62D^0]"); break;
-				}
-				break;
-			case 2: Com_Printf(" ^7- ^2dma^1EX^22");
-				switch (dmaHD_Mixer->integer % 10)
-				{
-					case 1: Com_Printf(" ^0[^6No reverb^0]"); break;
-				}
-				break;
-			case 3: Com_Printf(" ^7- ^2dma^1EX");
-				break;
+			case 10: Com_Printf(" dmaHD full 3D sound mixer [10]\n"); break;
+			case 11: Com_Printf(" dmaHD planar 3D sound mixer [11]\n"); break;
+			case 20: Com_Printf(" dmaEX2 sound mixer [20]\n"); break;
+			case 21: Com_Printf(" dmaEX2 sound mixer with no reverb [21]\n"); break;
+			case 30: Com_Printf(" dmaEX sound mixer [30]\n"); break;
 		}
-		Com_Printf("\n");
-		Com_Printf("  ^2%d^3ch ^7- ^2%d^3Hz ^7- ^2%d^3bps\n", dma.channels, dma.speed, dma.samplebits);
+		Com_Printf(" %d ch / %d Hz / %d bps\n", dma.channels, dma.speed, dma.samplebits);
 		if (s_numSfx > 0 || g_dmaHD_allocatedsoundmemory > 0)
 		{
-			Com_Printf("  ^2%d^3sounds ^7in ^2%.2f^3MiB\n", s_numSfx, (float)g_dmaHD_allocatedsoundmemory / 1048576.0f);
+			Com_Printf(" %d sounds in %.2f MiB\n", s_numSfx, (float)g_dmaHD_allocatedsoundmemory / 1048576.0f);
 		}
 		else
 		{
-			Com_Printf("  ^1No sounds loaded yet\n");
+			Com_Printf(" No sounds loaded yet.\n");
 		}
 	}
-	for (i = 0; i < 19; i++) Com_Printf("^7-^6-" );
 	Com_Printf("\n" );
 }
 
@@ -1441,25 +1363,23 @@ void dmaHD_SoundList(void)
 	int i;
 	sfx_t *sfx;
 	
-	for (i = 0; i < 19; i++) Com_Printf("^7-^6-" );
 	Com_Printf("\n" );
-	Com_Printf("^2p5yc0runn3r's ^3dma^1HD ^7sound list\n");
+	Com_Printf("dmaHD HRTF sound engine by p5yc0runn3r\n");
 
 	if (s_numSfx > 0 || g_dmaHD_allocatedsoundmemory > 0)
 	{
 		for (sfx = s_knownSfx, i = 0; i < s_numSfx; i++, sfx++)
 		{
-			Com_Printf("  %s%s ^2%.2f^3KiB\n", 
-				(sfx->inMemory ? S_COLOR_GREEN : S_COLOR_RED), sfx->soundName, 
-				(float)sfx->soundLength / 1024.0f);
+			Com_Printf(" %s %.2f KiB %s\n", 
+				sfx->soundName, (float)sfx->soundLength / 1024.0f, 
+				(sfx->inMemory ? "" : "!"));
 		}
-		Com_Printf("  ^2%d^3sounds ^7in ^2%.2f^3MiB\n", s_numSfx, (float)g_dmaHD_allocatedsoundmemory / 1048576.0f);
+		Com_Printf(" %d sounds in %.2f MiB\n", s_numSfx, (float)g_dmaHD_allocatedsoundmemory / 1048576.0f);
 	}
 	else
 	{
-		Com_Printf("  ^1No sounds loaded yet\n");
+		Com_Printf(" No sounds loaded yet.\n");
 	}
-	for (i = 0; i < 19; i++) Com_Printf("^7-^6-" );
 	Com_Printf("\n" );
 }
 
@@ -1477,8 +1397,10 @@ qboolean dmaHD_Init(soundInterface_t *si)
 	if (!dmaHD_Enabled()) return qtrue;
 
 	dmaHD_Mixer = Cvar_Get("dmaHD_mixer", "10", CVAR_ARCHIVE);
-	if (dmaHD_Mixer->integer != 10 && dmaHD_Mixer->integer != 11 &&
-		dmaHD_Mixer->integer != 20 && dmaHD_Mixer->integer != 21 &&
+	if (dmaHD_Mixer->integer != 10 && 
+		dmaHD_Mixer->integer != 11 &&
+		dmaHD_Mixer->integer != 20 && 
+		dmaHD_Mixer->integer != 21 &&
 		dmaHD_Mixer->integer != 30)
 	{
 		Cvar_Set("dmaHD_Mixer", "10");
@@ -1486,7 +1408,6 @@ qboolean dmaHD_Init(soundInterface_t *si)
 	}
 
 	dmaEX_StereoSeparation = Cvar_Get("dmaEX_StereoSeparation", "0.9", CVAR_ARCHIVE);
-	
 	if (dmaEX_StereoSeparation->value < 0.1) 
 	{
 		Cvar_Set("dmaEX_StereoSeparation", "0.1");
@@ -1497,7 +1418,6 @@ qboolean dmaHD_Init(soundInterface_t *si)
 		Cvar_Set("dmaEX_StereoSeparation", "2.0");
 		dmaEX_StereoSeparation = Cvar_Get("dmaEX_StereoSeparation", "0.9", CVAR_ARCHIVE);
 	}
-
 
 	dmaHD_Interpolation = Cvar_Get("dmaHD_interpolation", "3", CVAR_ARCHIVE);
 	if (dmaHD_Interpolation->integer == 0)

@@ -88,6 +88,7 @@ cvar_t		*s_dev;
 cvar_t		*s_show;
 cvar_t		*s_mixahead;
 cvar_t		*s_mixPreStep;
+cvar_t      *s_alttabmute;
 
 loopSound_t		loopSounds[MAX_GENTITIES];
 static	channel_t		*freelist = NULL;
@@ -120,6 +121,16 @@ void S_Base_SoundInfo(void) {
 
 	}
 	Com_Printf("----------------------\n" );
+}
+
+/*
+=================
+S_dmaHD_devlist
+=================
+*/
+void S_dmaHD_devlist(void)
+{
+	SNDDMAHD_DevList();
 }
 
 /*
@@ -230,14 +241,16 @@ static sfx_t *S_FindName( const char *name ) {
 	sfx_t	*sfx;
 
 	if (!name) {
-		Com_Error (ERR_FATAL, "S_FindName: NULL\n");
+		Com_Error (ERR_FATAL, "Sound name is a NULL string\n");
 	}
 	if (!name[0]) {
-		Com_Error (ERR_FATAL, "S_FindName: empty name\n");
+		Com_Printf(S_COLOR_YELLOW "WARNING: Sound name is empty\n");
+		return NULL;
 	}
 
 	if (strlen(name) >= MAX_QPATH) {
-		Com_Error (ERR_FATAL, "Sound name too long: %s", name);
+		Com_Printf(S_COLOR_YELLOW "WARNING: Sound name is too long: %s\n", name);
+		return NULL;
 	}
 
 	hash = S_HashSFXName(name);
@@ -323,12 +336,10 @@ sfxHandle_t	S_Base_RegisterSound( const char *name, qboolean compressed ) {
 		return 0;
 	}
 
-	if ( strlen( name ) >= MAX_QPATH ) {
-		Com_Printf( "Sound name exceeds MAX_QPATH\n" );
-		return 0;
-	}
-
 	sfx = S_FindName( name );
+	if (!sfx)
+		return 0;
+
 	if ( sfx->soundData ) {
 		if ( sfx->defaultSound ) {
 			Com_Printf( S_COLOR_YELLOW "WARNING: could not find %s - using default\n", sfx->soundName );
@@ -340,7 +351,7 @@ sfxHandle_t	S_Base_RegisterSound( const char *name, qboolean compressed ) {
 	sfx->inMemory = qfalse;
 	sfx->soundCompressed = compressed;
 
-  S_memoryLoad(sfx);
+	S_memoryLoad(sfx);
 
 	if ( sfx->defaultSound ) {
 		Com_Printf( S_COLOR_YELLOW "WARNING: could not find %s - using default\n", sfx->soundName );
@@ -365,8 +376,8 @@ void S_Base_BeginRegistration( void ) {
 		s_numSfx = 0;
 		Com_Memset( s_knownSfx, 0, sizeof( s_knownSfx ) );
 		Com_Memset(sfxHash, 0, sizeof(sfx_t *)*LOOP_HASH);
-
-		S_Base_RegisterSound("sound/feedback/hit.wav", qfalse);		// changed to a sound in baseq3
+		
+		S_Base_RegisterSound("sound/null.wav", qfalse);		// changed to a sound in baseq3
 	}
 }
 
@@ -1271,6 +1282,32 @@ void S_Base_StopBackgroundTrack( void ) {
 
 /*
 ======================
+S_OpenBackgroundStream
+======================
+*/
+static void S_OpenBackgroundStream( const char *filename ) {
+	// close the background track, but DON'T reset s_rawend
+	// if restarting the same back ground track
+	if(s_backgroundStream)
+	{
+		S_CodecCloseStream(s_backgroundStream);
+		s_backgroundStream = NULL;
+	}
+
+	// Open stream
+	s_backgroundStream = S_CodecOpenStream(filename);
+	if(!s_backgroundStream) {
+		Com_Printf( S_COLOR_YELLOW "WARNING: couldn't open music file %s\n", filename );
+		return;
+	}
+
+	if(s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 22050) {
+		Com_Printf(S_COLOR_YELLOW "WARNING: music file %s is not 22k stereo\n", filename );
+	}
+}
+
+/*
+======================
 S_StartBackgroundTrack
 ======================
 */
@@ -1293,24 +1330,7 @@ void S_Base_StartBackgroundTrack( const char *intro, const char *loop ){
 		Q_strncpyz( s_backgroundLoop, loop, sizeof( s_backgroundLoop ) );
 	}
 
-	// close the background track, but DON'T reset s_rawend
-	// if restarting the same back ground track
-	if(s_backgroundStream)
-	{
-		S_CodecCloseStream(s_backgroundStream);
-		s_backgroundStream = NULL;
-	}
-
-	// Open stream
-	s_backgroundStream = S_CodecOpenStream(intro);
-	if(!s_backgroundStream) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: couldn't open music file %s\n", intro );
-		return;
-	}
-
-	if(s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 22050) {
-		Com_Printf(S_COLOR_YELLOW "WARNING: music file %s is not 22k stereo\n", intro );
-	}
+	S_OpenBackgroundStream( intro );
 }
 
 /*
@@ -1375,9 +1395,7 @@ void S_UpdateBackgroundTrack( void ) {
 			// loop
 			if(s_backgroundLoop[0])
 			{
-				S_CodecCloseStream(s_backgroundStream);
-				s_backgroundStream = NULL;
-				S_Base_StartBackgroundTrack( s_backgroundLoop, s_backgroundLoop );
+				S_OpenBackgroundStream( s_backgroundLoop );
 				if(!s_backgroundStream)
 					return;
 			}
@@ -1442,6 +1460,7 @@ void S_Base_Shutdown( void ) {
 	s_soundStarted = 0;
 
 	Cmd_RemoveCommand("s_info");
+	Cmd_RemoveCommand("s_devlist");
 }
 
 /*
@@ -1456,13 +1475,20 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		return qfalse;
 	}
 
+#ifndef NO_DMAHD
+	s_khz = Cvar_Get ("s_khz", "44", CVAR_ARCHIVE);
+#else
 	s_khz = Cvar_Get ("s_khz", "22", CVAR_ARCHIVE);
+#endif
 	s_mixahead = Cvar_Get ("s_mixahead", "0.2", CVAR_ARCHIVE);
 	s_mixPreStep = Cvar_Get ("s_mixPreStep", "0.05", CVAR_ARCHIVE);
 	s_show = Cvar_Get ("s_show", "0", CVAR_CHEAT);
 	s_testsound = Cvar_Get ("s_testsound", "0", CVAR_CHEAT);
 	s_dev = Cvar_Get ("s_dev", "", CVAR_ARCHIVE);
+    s_alttabmute = Cvar_Get ("s_alttabmute", "1", CVAR_ARCHIVE);
 
+	Cmd_AddCommand( "s_devlist", S_dmaHD_devlist );
+	
 	r = SNDDMA_Init();
 
 	if ( r ) {

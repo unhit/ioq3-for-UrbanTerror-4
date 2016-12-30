@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 /*****************************************************************************
  * name:		files.c
  *
- * desc:		handle based filesystem for Quake III Arena 
+ * desc:		handle based filesystem for Quake III Arena
  *
  * $Archive: /MissionPack/code/qcommon/files.c $
  *
@@ -38,7 +38,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 QUAKE3 FILESYSTEM
 
-All of Quake's data access is through a hierarchical file system, but the contents of 
+All of Quake's data access is through a hierarchical file system, but the contents of
 the file system can be transparently merged from several sources.
 
 A "qpath" is a reference to game file data.  MAX_ZPATH is 256 characters, which must include
@@ -193,6 +193,9 @@ static const unsigned pak_checksums[] = {
 static int pak_purechecksums[1];
 
 
+int foreignQVMsFound;
+char foreignQVMNames[MAX_ZPATH][MAX_SEARCH_PATHS];
+
 // if this is defined, the executable positively won't work with any paks other
 // than the demo pak, even if productid is present.  This is only used for our
 // last demo release to prevent the mac and linux users from using the demo
@@ -200,10 +203,6 @@ static int pak_purechecksums[1];
 // hit the shelves a little later
 // NOW defined in build files
 //#define PRE_RELEASE_TADEMO
-
-#define MAX_ZPATH			256
-#define	MAX_SEARCH_PATHS	4096
-#define MAX_FILEHASH_SIZE	1024
 
 typedef struct fileInPack_s {
 	char					*name;		// name of the file
@@ -599,7 +598,7 @@ qboolean FS_FileExists( const char *file )
 ================
 FS_SV_FileExists
 
-Tests if the file exists 
+Tests if the file exists
 ================
 */
 qboolean FS_SV_FileExists( const char *file )
@@ -1020,7 +1019,7 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 
 	// make absolutely sure that it can't back up the path.
 	// The searchpaths do guarantee that something will always
-	// be prepended, so we don't need to worry about "c:" or "//limbo" 
+	// be prepended, so we don't need to worry about "c:" or "//limbo"
 	if ( strstr( filename, ".." ) || strstr( filename, "::" ) ) {
 		*file = 0;
 		return -1;
@@ -1061,9 +1060,9 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 					// found it!
 
 					// mark the pak as having been referenced and mark specifics on cgame and ui
-					// shaders, txt, arena files  by themselves do not count as a reference as 
-					// these are loaded from all pk3s 
-					// from every pk3 file.. 
+					// shaders, txt, arena files  by themselves do not count as a reference as
+					// these are loaded from all pk3s
+					// from every pk3 file..
 					l = strlen( filename );
 					if ( !(pak->referenced & FS_GENERAL_REF)) {
 						if ( Q_stricmp(filename + l - 7, ".shader") != 0 &&
@@ -1113,7 +1112,7 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 					fsh[*file].zipFilePos = pakFile->pos;
 
 					if ( fs_debug->integer ) {
-						Com_Printf( "FS_FOpenFileRead: %s (found in '%s')\n", 
+						Com_Printf( "FS_FOpenFileRead: %s (found in '%s')\n",
 							filename, pak->pakFilename );
 					}
 					return zfi->cur_file_info.uncompressed_size;
@@ -1422,7 +1421,7 @@ int	FS_FileIsInPAK(const char *filename, int *pChecksum ) {
 
 	// make absolutely sure that it can't back up the path.
 	// The searchpaths do guarantee that something will always
-	// be prepended, so we don't need to worry about "c:" or "//limbo" 
+	// be prepended, so we don't need to worry about "c:" or "//limbo"
 	if ( strstr( filename, ".." ) || strstr( filename, "::" ) ) {
 		return -1;
 	}
@@ -1656,11 +1655,12 @@ static pack_t *FS_LoadZipFile( char *zipfile, const char *basename )
 	unz_global_info gi;
 	char			filename_inzip[MAX_ZPATH];
 	unz_file_info	file_info;
-	int				i, len;
+	int				i, j, len;
 	long			hash;
 	int				fs_numHeaderLongs;
 	int				*fs_headerLongs;
 	char			*namePtr;
+	qboolean		alreadyForeign = qfalse;
 
 	fs_numHeaderLongs = 0;
 
@@ -1722,6 +1722,20 @@ static pack_t *FS_LoadZipFile( char *zipfile, const char *basename )
 		if (err != UNZ_OK) {
 			break;
 		}
+
+		if (strstr(filename_inzip, ".qvm") && strstr(pack->pakFilename, "download/")) {
+			for (j = 0; j < foreignQVMsFound; j++) {
+				if (!strcmp(foreignQVMNames[j], pack->pakBasename)) {
+					alreadyForeign = qtrue;
+				}
+			}
+
+			if (!alreadyForeign) {
+				Com_sprintf(foreignQVMNames[foreignQVMsFound], MAX_ZPATH, pack->pakBasename);
+				foreignQVMsFound++;
+			}
+		}
+
 		if (file_info.uncompressed_size > 0) {
 			fs_headerLongs[fs_numHeaderLongs++] = LittleLong(file_info.crc);
 		}
@@ -2128,7 +2142,7 @@ int	FS_GetModList( char *listbuf, int bufsize ) {
 			//   we will try each three of them here (yes, it's a bit messy)
 			path = FS_BuildOSPath( fs_basepath->string, name, "" );
 			nPaks = 0;
-			pPaks = Sys_ListFiles(path, ".pk3", NULL, &nPaks, qfalse); 
+			pPaks = Sys_ListFiles(path, ".pk3", NULL, &nPaks, qfalse);
 			Sys_FreeFileList( pPaks ); // we only use Sys_ListFiles to check wether .pk3 files are present
 
 			/* try on home path */
@@ -2562,7 +2576,7 @@ qboolean FS_ComparePaks( char *neededpaks, int len, qboolean dlstring ) {
 			}
 		}
 
-		if ( !havepak && fs_serverReferencedPakNames[i] && *fs_serverReferencedPakNames[i] ) { 
+		if ( !havepak && fs_serverReferencedPakNames[i] && *fs_serverReferencedPakNames[i] ) {
 			// Don't got it
 
 			if (dlstring)
@@ -2727,6 +2741,8 @@ static void FS_Startup( const char *gameName )
 
 	Com_Printf( "----- FS_Startup -----\n" );
 
+	foreignQVMsFound = 0;
+
 	fs_debug = Cvar_Get( "fs_debug", "0", 0 );
 	fs_basepath = Cvar_Get ("fs_basepath", Sys_DefaultInstallPath(), CVAR_INIT );
 	fs_basegame = Cvar_Get ("fs_basegame", "", CVAR_INIT );
@@ -2745,6 +2761,7 @@ static void FS_Startup( const char *gameName )
 
 	// add search path elements in reverse priority order
 	if (fs_basepath->string[0]) {
+		FS_AddGameDirectory(va("%s/q3ut4", fs_basepath->string), "download");
 		FS_AddGameDirectory( fs_basepath->string, gameName );
 	}
 	// fs_homepath is somewhat particular to *nix systems, only add if relevant
@@ -2759,6 +2776,7 @@ static void FS_Startup( const char *gameName )
 	
 	// NOTE: same filtering below for mods and basegame
 	if (fs_homepath->string[0] && Q_stricmp(fs_homepath->string,fs_basepath->string)) {
+		FS_AddGameDirectory(va("%s/q3ut4", fs_homepath->string), "download");
 		FS_AddGameDirectory ( fs_homepath->string, gameName );
 	}
 
@@ -2853,6 +2871,34 @@ const char *FS_GamePureChecksum( void ) {
 
 /*
 =====================
+FS_LoadedPakChecksumsBlob
+
+Return pak checksums as a binary blob with length at start
+=====================
+*/
+int FS_LoadedPakChecksumsBlob( unsigned char *dst, int dstlen ) {
+    searchpath_t    *search;
+    int num = 0;
+    int dp = 0;
+
+    for ( search = fs_searchpaths ; search ; search = search->next ) {
+        // is the element a pak file?
+        if ( !search->pack ) {
+            continue;
+        }
+        if (dp+4>=dstlen) return 0;
+        dst[dp+0] = search->pack->checksum&0xFF;
+        dst[dp+1] = (search->pack->checksum>>8)&0xFF;
+        dst[dp+2] = (search->pack->checksum>>16)&0xFF;
+        dst[dp+3] = (search->pack->checksum>>24)&0xFF;
+        dp+=4;
+        num++;
+    }
+    return dp;
+}
+
+/*
+=====================
 FS_LoadedPakChecksums
 
 Returns a space separated string containing the checksums of all loaded pk3 files.
@@ -2868,7 +2914,7 @@ const char *FS_LoadedPakChecksums( void ) {
 	info[0] = 0;
 
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
-		// is the element a pak file? 
+		// is the element a pak file?
 		if ( !search->pack ) {
 			continue;
 		}
@@ -2905,7 +2951,7 @@ Servers with sv_pure set will get this string and pass it to clients.
 =====================
 */
 const char *FS_LoadedPakNames( void ) {
-	static char	info[BIG_INFO_STRING];
+	static char	info[BIG_INFO_STRING*4];
 	searchpath_t	*search;
 	int i;
 	qboolean found;
@@ -2965,7 +3011,7 @@ const char *FS_LoadedPakPureChecksums( void ) {
 	info[0] = 0;
 
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
-		// is the element a pak file? 
+		// is the element a pak file?
 		if ( !search->pack ) {
 			continue;
 		}
@@ -2998,7 +3044,7 @@ const char *FS_LoadedPakPureChecksums( void ) {
 FS_ReferencedPakChecksums
 
 Returns a space separated string containing the checksums of all referenced pk3 files.
-The server will send this to the clients so they can check which files should be auto-downloaded. 
+The server will send this to the clients so they can check which files should be auto-downloaded.
 =====================
 */
 const char *FS_ReferencedPakChecksums( void ) {
@@ -3025,7 +3071,7 @@ const char *FS_ReferencedPakChecksums( void ) {
 FS_ReferencedPakPureChecksums
 
 Returns a space separated string containing the pure checksums of all referenced pk3 files.
-Servers with sv_pure set will get this string back from clients for pure validation 
+Servers with sv_pure set will get this string back from clients for pure validation
 
 The string has a specific order, "cgame ui @ ref1 ref2 ref3 ..."
 =====================
@@ -3076,7 +3122,7 @@ const char *FS_ReferencedPakPureChecksums( void ) {
 FS_ReferencedPakNames
 
 Returns a space separated string containing the names of all referenced pk3 files.
-The server will send this to the clients so they can check which files should be auto-downloaded. 
+The server will send this to the clients so they can check which files should be auto-downloaded.
 =====================
 */
 const char *FS_ReferencedPakNames( void ) {
@@ -3191,7 +3237,7 @@ FS_PureServerSetReferencedPaks
 
 The checksums and names of the pk3 files referenced at the server
 are sent to the client and stored here. The client will use these
-checksums to see if any pk3 files need to be auto-downloaded. 
+checksums to see if any pk3 files need to be auto-downloaded.
 =====================
 */
 void FS_PureServerSetReferencedPaks( const char *pakSums, const char *pakNames ) {
@@ -3327,7 +3373,7 @@ void FS_Restart( int checksumFeed ) {
 			lastValidBase[0] = '\0';
 			lastValidGame[0] = '\0';
 			FS_Restart(checksumFeed);
-			Com_Error( ERR_DROP, "Invalid game folder\n" );
+			Com_Error( ERR_DROP, "Invalid game folder\nIt may be because you are running a different version from this server. Please check that you are up to date on www.urbanterror.info\n" );
 			return;
 		}
 		Com_Error( ERR_FATAL, "Couldn't load default.cfg" );

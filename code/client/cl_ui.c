@@ -319,6 +319,7 @@ static void LAN_GetServerInfo( int source, int n, char *buf, int buflen ) {
 		Info_SetValueForKey( info, "hostname", server->hostName);
 		Info_SetValueForKey( info, "mapname", server->mapName);
 		Info_SetValueForKey( info, "clients", va("%i",server->clients));
+		Info_SetValueForKey( info, "bots", va("%i",server->bots));
 		Info_SetValueForKey( info, "sv_maxclients", va("%i",server->maxClients));
 		Info_SetValueForKey( info, "ping", va("%i",server->ping));
 		Info_SetValueForKey( info, "minping", va("%i",server->minPing));
@@ -1121,7 +1122,7 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return NET_StringToAdr( VMA(1), VMA(2));
 		
 	case UI_Q_VSNPRINTF:
-		return Q_vsnprintf( VMA(1), VMA(2), VMA(3), VMA(4));
+		return Q_vsnprintf( VMA(1), *((size_t *)VMA(2)), VMA(3), VMA(4));
 		
 	case UI_NET_SENDPACKET:
 		{
@@ -1134,7 +1135,8 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return 0;
 		
 	case UI_COPYSTRING:
-		return CopyString(VMA(1));
+		CopyString(VMA(1));
+		return 0;
 
 	//case UI_SYS_STARTPROCESS:
 	//	Sys_StartProcess( VMA(1), VMA(2) );
@@ -1187,7 +1189,7 @@ void CL_InitUI( void ) {
 	}
 	uivm = VM_Create( "ui", CL_UISystemCalls, interpret );
 	if ( !uivm ) {
-		Com_Error( ERR_FATAL, "VM_Create on UI failed" );
+		Com_Error( ERR_FATAL, "VM_Create on UI failed. It may be because you are running a different version from this server. Please check that you are up to date on www.urbanterror.info\n" );
 	}
 
 	// sanity check

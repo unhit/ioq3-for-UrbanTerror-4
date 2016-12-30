@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // q_shared.h -- included first by ALL program modules.
 // A user mod should never modify this file
 
-#define Q3_VERSION            "ioQ3 1.35 urt 4.2.013"
+#define Q3_VERSION            "ioQ3 1.35 urt 4.3.2"
 #ifndef SVN_VERSION
   #define SVN_VERSION Q3_VERSION
 #endif
@@ -105,6 +105,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <ctype.h>
 #include <limits.h>
 
+// vsnprintf is ISO/IEC 9899:1999
+// abstracting this to make it portable
+#ifdef _WIN32
+  #define Q_vsnprintf _vsnprintf
+  #define Q_snprintf _snprintf
+#else
+  #define Q_vsnprintf vsnprintf
+  #define Q_snprintf snprintf
+#endif
+
 #endif
 
 #include "q_platform.h"
@@ -116,7 +126,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #else
   #ifndef _MSC_VER
     #include <stdint.h>
-    #define Q_vsnprintf vsnprintf
   #else
     #include <io.h>
     typedef __int64 int64_t;
@@ -127,8 +136,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
     typedef unsigned __int32 uint32_t;
     typedef unsigned __int16 uint16_t;
     typedef unsigned __int8 uint8_t;
-
-    int Q_vsnprintf(char *str, size_t size, const char *format, va_list ap);
   #endif
 #endif
 
@@ -187,6 +194,10 @@ typedef int		clipHandle_t;
 #define	MAX_NAME_LENGTH		32		// max length of a client name
 
 #define	MAX_SAY_TEXT	150
+
+// Fenix
+#define MAX_MAPLIST_SIZE    8       // Maximum number of maps to display upon partial name multiple match
+#define MAX_MAPLIST_STRING  8192    // Length of the string retrieved using FS_GetFileList
 
 // paramters for command buffer stuffing
 typedef enum {
@@ -338,7 +349,7 @@ extern	vec4_t		colorMdGrey;
 extern	vec4_t		colorDkGrey;
 
 #define Q_COLOR_ESCAPE	'^'
-#define Q_IsColorString(p)	( p && *(p) == Q_COLOR_ESCAPE && *((p)+1) && *((p)+1) != Q_COLOR_ESCAPE )
+#define Q_IsColorString(p) (p && *p == Q_COLOR_ESCAPE && *(p+1) && *(p+1) >= '0' && *(p+1) <= '9')
 
 #define COLOR_BLACK		'0'
 #define COLOR_RED		'1'
@@ -688,6 +699,10 @@ char	*Q_strrchr( const char* string, int c );
 char	*Q_strnchr( const char* string, int c, int n );
 char	*Q_strnrchr( const char *string, int c, int n );
 
+// Fenix: for substring matching
+int Q_strsub (const char *s1, const char *s2);
+int Q_strisub (const char *s1, const char *s2);
+
 // buffer size safe library replacements
 void	Q_strncpyz( char *dest, const char *src, int destsize );
 void	Q_strcat( char *dest, int size, const char *src );
@@ -884,10 +899,11 @@ typedef struct {
 
 // in order from highest priority to lowest
 // if none of the catchers are active, bound key strings will be executed
-#define KEYCATCH_CONSOLE		0x0001
-#define	KEYCATCH_UI					0x0002
-#define	KEYCATCH_MESSAGE		0x0004
-#define	KEYCATCH_CGAME			0x0008
+#define KEYCATCH_CONSOLE    0x0001
+#define KEYCATCH_UI         0x0002
+#define KEYCATCH_MESSAGE    0x0004
+#define KEYCATCH_CGAME      0x0008
+#define KEYCATCH_RADIO      0x0010
 
 
 // sound channels

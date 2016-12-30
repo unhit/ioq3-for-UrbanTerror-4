@@ -102,7 +102,7 @@ void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, usercmd_t *from, usercmd_t *t
 
 void MSG_WriteDeltaEntity( msg_t *msg, struct entityState_s *from, struct entityState_s *to
 						   , qboolean force );
-void MSG_ReadDeltaEntity( msg_t *msg, entityState_t *from, entityState_t *to, 
+void MSG_ReadDeltaEntity( msg_t *msg, entityState_t *from, entityState_t *to,
 						 int number );
 
 void MSG_WriteDeltaPlayerstate( msg_t *msg, struct playerState_s *from, struct playerState_s *to );
@@ -176,7 +176,7 @@ void		NET_Sleep(int msec);
 
 #define MAX_DOWNLOAD_WINDOW			8		// max of eight download frames
 #define MAX_DOWNLOAD_BLKSIZE		2048	// 2048 byte block chunks
- 
+
 
 /*
 Netchan handles packet fragmentation and out of order / duplicate suppression
@@ -241,11 +241,17 @@ extern int demo_protocols[];
 #ifndef MASTER_SERVER_NAME
 #define MASTER_SERVER_NAME	"master.urbanterror.info"
 #endif
+#ifndef MASTER2_SERVER_NAME
+#define MASTER2_SERVER_NAME	"master2.urbanterror.info"
+#endif
+#ifndef MASTER3_SERVER_NAME
+#define MASTER3_SERVER_NAME	"master3.urbanterror.info"
+#endif
 #ifndef AUTHORIZE_SERVER_NAME
 #define	AUTHORIZE_SERVER_NAME	"authorize.urbanterror.info"
 #endif
 
-#define	PORT_MASTER			27950
+#define	PORT_MASTER			27900
 #define	PORT_UPDATE			27951
 #ifndef PORT_AUTHORIZE
 #define	PORT_AUTHORIZE		27952
@@ -320,7 +326,7 @@ typedef enum {
 } sharedTraps_t;
 
 void	VM_Init( void );
-vm_t	*VM_Create( const char *module, intptr_t (*systemCalls)(intptr_t *), 
+vm_t	*VM_Create( const char *module, intptr_t (*systemCalls)(intptr_t *),
 				   vmInterpret_t interpret );
 // module should be bare: "cgame", not "cgame.dll" or "vm/cgame.qvm"
 
@@ -532,6 +538,13 @@ issues.
 ==============================================================
 */
 
+#define MAX_ZPATH			256
+#define	MAX_SEARCH_PATHS	4096
+#define MAX_FILEHASH_SIZE	1024
+
+extern int foreignQVMsFound;
+extern char foreignQVMNames[MAX_ZPATH][MAX_SEARCH_PATHS];
+
 // referenced flags
 // these are in loop specific order so don't change the order
 #define FS_GENERAL_REF	0x01
@@ -638,13 +651,14 @@ const char *FS_LoadedPakChecksums( void );
 const char *FS_LoadedPakPureChecksums( void );
 // Returns a space separated string containing the checksums of all loaded pk3 files.
 // Servers with sv_pure set will get this string and pass it to clients.
+int FS_LoadedPakChecksumsBlob( unsigned char *dst, int dstlen );
 
 const char *FS_ReferencedPakNames( void );
 const char *FS_ReferencedPakChecksums( void );
 const char *FS_ReferencedPakPureChecksums( void );
-// Returns a space separated string containing the checksums of all loaded 
-// AND referenced pk3 files. Servers with sv_pure set will get this string 
-// back from clients for pure validation 
+// Returns a space separated string containing the checksums of all loaded
+// AND referenced pk3 files. Servers with sv_pure set will get this string
+// back from clients for pure validation
 
 void FS_ClearPakReferences( int flags );
 // clears referenced booleans on loaded pk3s
@@ -765,6 +779,10 @@ extern	cvar_t	*com_journal;
 extern	cvar_t	*com_cameraMode;
 extern	cvar_t	*com_altivec;
 
+//@Barbatos - name of the console log file (default: qconsole.log)
+// It allows you to keep the logs of multiple servers using the same executable
+extern 	cvar_t 	*com_logfileName;
+
 // both client and server must agree to pause
 extern	cvar_t	*cl_paused;
 extern	cvar_t	*sv_paused;
@@ -871,7 +889,10 @@ void CL_InitKeyCommands( void );
 void CL_Init( void );
 void CL_Disconnect( qboolean showMainMenu );
 void CL_Shutdown( void );
+
 void CL_Frame( int msec );
+qboolean CL_IsDownloading(void);
+
 qboolean CL_GameCommand( void );
 void CL_KeyEvent (int key, qboolean down, unsigned time);
 
@@ -885,6 +906,8 @@ void CL_JoystickEvent( int axis, int value, int time );
 void CL_PacketEvent( netadr_t from, msg_t *msg );
 
 void CL_ConsolePrint( char *text );
+
+void CL_DevConsolePrint( char *text );
 
 void CL_MapLoading( void );
 // do a screen update before starting to load a map
@@ -1062,6 +1085,8 @@ int Sys_MonkeyShouldBeSpanked( void );
 
 qboolean Sys_DetectAltivec( void );
 
+void Sys_SetEnv(const char *name, const char *value);
+
 /* This is based on the Adaptive Huffman algorithm described in Sayood's Data
  * Compression book.  The ranks are not actually stored, but implicitly defined
  * by the location of a node within a doubly-linked list */
@@ -1070,7 +1095,7 @@ qboolean Sys_DetectAltivec( void );
 #define INTERNAL_NODE (HMAX+1)
 
 typedef struct nodetype {
-	struct	nodetype *left, *right, *parent; /* tree structure */ 
+	struct	nodetype *left, *right, *parent; /* tree structure */
 	struct	nodetype *next, *prev; /* doubly-linked list */
 	struct	nodetype **head; /* highest ranked node in block */
 	int		weight;
@@ -1122,5 +1147,13 @@ extern huffman_t clientHuffTables;
 #define DLF_NO_UDP 4
 #define DLF_NO_DISCONNECT 8
 #define DLF_BSPNAME_ONLY 32
+
+// compressed pure list buffer
+#define PURE_COMPRESS_BUFFER 16384
+
+// last N CS will be used:
+#define PURE_COMPRESS_NUMCS 8
+
+
 
 #endif // _QCOMMON_H_

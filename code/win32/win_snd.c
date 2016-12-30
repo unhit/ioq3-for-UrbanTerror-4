@@ -28,7 +28,9 @@ HRESULT (WINAPI *pDirectSoundCreate)(GUID FAR *lpGUID, LPDIRECTSOUND FAR *lplpDS
 #define iDirectSoundCreate(a,b,c)	pDirectSoundCreate(a,b,c)
 typedef HRESULT (WINAPI *pDirectSoundEnumerate)(LPDSENUMCALLBACK lpDSEnumCallback, LPVOID lpContext);
 
-#define SECONDARY_BUFFER_SIZE	0x10000
+// p5yc0runn3r - Increased buffer size from 65536 (0x10000) to 131072 (0x20000) due to increased KHz
+#define SECONDARY_BUFFER_SIZE	0x20000
+
 
 
 static qboolean	dsound_init;
@@ -42,6 +44,7 @@ static LPGUID g_dsguid = NULL;
 
 extern cvar_t		*s_khz;
 extern cvar_t		*s_dev;
+extern cvar_t       *s_alttabmute;
 
 static const char *DSoundError( int error ) {
 	switch ( error ) {
@@ -167,6 +170,57 @@ BOOL CALLBACK SNDDMAHD_DSEnumCallback(LPGUID lpguid, LPCSTR lpszdesc, LPCSTR lps
 	return TRUE; // Continue enumerating
 }
 
+BOOL CALLBACK SNDDMAHD_DSEnumCallbackList(LPGUID lpguid, LPCSTR lpszdesc, LPCSTR lpszmod, LPVOID lpcontext)
+{
+	Com_Printf("> ^3%s\n", lpszdesc);
+	return TRUE; // Continue enumerating
+}
+
+qboolean SNDDMAHD_DSEnumSoundDevices(qboolean blistonly)
+{
+	HMODULE hdsounddll = NULL;
+	pDirectSoundEnumerate DSEnumerate;
+
+	if ((hdsounddll = LoadLibrary("dsound.dll")) != NULL &&
+		(DSEnumerate = (pDirectSoundEnumerate)GetProcAddress(hdsounddll, "DirectSoundEnumerateA")) != NULL &&
+		s_dev->string != NULL && s_dev->string[0] != '\0')
+	{
+		if (blistonly) 
+		{
+			Com_Printf( "^4List of DirectSound devices:\n");
+			if (FAILED(DSEnumerate(SNDDMAHD_DSEnumCallbackList, NULL)))
+			{
+				Com_Printf("^1Error Enumerating DirectSound Devices\n");
+				return qfalse;
+			}
+		}
+		else
+		{
+			Com_Printf( "^4Looking for DirectSound Device '%s'\n", s_dev->string);
+		
+			if (FAILED(DSEnumerate(SNDDMAHD_DSEnumCallback, NULL)))
+			{
+				Com_Printf("^1Error Enumerating DirectSound Devices\n");
+				return qfalse;
+			}
+		
+			if (g_dsguid == NULL)
+				Com_Printf("^1Device '%s' not found. ^2Using default driver.\n", s_dev->string);
+		}
+	}
+	if (hdsounddll != NULL) FreeLibrary(hdsounddll);
+	hdsounddll = NULL;
+	return qtrue;
+}
+
+qboolean SNDDMAHD_DevList(void)
+{
+	return SNDDMAHD_DSEnumSoundDevices(qtrue);
+}
+
+#ifndef NO_DMAHD
+qboolean dmaHD_Enabled(void);
+#endif
 
 int SNDDMA_InitDS ()
 {
@@ -175,21 +229,9 @@ int SNDDMA_InitDS ()
 	DSBCAPS			dsbcaps;
 	WAVEFORMATEX	format;
 	int				use8;
-	HMODULE hdsounddll;
-	pDirectSoundEnumerate DSEnumerate;
-
-	if ((hdsounddll = LoadLibrary("dsound.dll")) != NULL &&
-		(DSEnumerate = (pDirectSoundEnumerate)GetProcAddress(hdsounddll, "DirectSoundEnumerateA")) != NULL &&
-		s_dev->string != NULL && s_dev->string[0] != '\0')
-	{
-		Com_Printf( "^4Looking for DirectSound Device '%s'\n", s_dev->string);
-		
-		if (FAILED(DSEnumerate(SNDDMAHD_DSEnumCallback, NULL)))
-			Com_Printf("^1Error Enumerating DirectSound Devices\n");
-		
-		if (g_dsguid == NULL)
-			Com_Printf("^1Device '%s' not found. ^2Using default driver.\n", s_dev->string);
-	}
+	
+	// Match/Choose output directsound device
+	SNDDMAHD_DSEnumSoundDevices(qfalse);
 
 	Com_Printf( "Initializing DirectSound\n");
 
@@ -228,6 +270,16 @@ int SNDDMA_InitDS ()
 	else if (s_khz->integer >= 22) dma.speed = 22050;
 	else dma.speed = 11025;
 
+#ifndef NO_DMAHD
+	if (dmaHD_Enabled()) 
+	{
+		// p5yc0runn3r - Fix dmaHD sound to 44KHz, Stereo and 16 bits per sample.
+		dma.speed = 44100;
+		dma.channels = 2;
+		dma.samplebits = 16;
+	}
+#endif		
+	
 	memset (&format, 0, sizeof(format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
     format.nChannels = dma.channels;
@@ -242,6 +294,7 @@ int SNDDMA_InitDS ()
 
 	// Micah: take advantage of 2D hardware.if available.
 	dsbuf.dwFlags = DSBCAPS_LOCHARDWARE;
+    if (s_alttabmute->integer == 0) dsbuf.dwFlags |= DSBCAPS_STICKYFOCUS; // Keep playing when out of focus.
 	if (use8) {
 		dsbuf.dwFlags |= DSBCAPS_GETCURRENTPOSITION2;
 	}
@@ -261,6 +314,7 @@ int SNDDMA_InitDS ()
 		if (use8) {
 			dsbuf.dwFlags |= DSBCAPS_GETCURRENTPOSITION2;
 		}
+        if (s_alttabmute->integer == 0) dsbuf.dwFlags |= DSBCAPS_STICKYFOCUS; // Keep playing when out of focus.
 		if (DS_OK != pDS->lpVtbl->CreateSoundBuffer(pDS, &dsbuf, &pDSBuf, NULL)) {
 			Com_Printf( "failed\n" );
 			SNDDMA_Shutdown ();

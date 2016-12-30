@@ -94,6 +94,8 @@ void IN_StartupJoystick (void);
 void IN_JoyMove(void);
 
 static void MidiInfo_f( void );
+void IN_CursorShow (void);
+void IN_CursorHide (void);
 
 /*
 ============================================================
@@ -148,8 +150,6 @@ void IN_ActivateWin32Mouse( void ) {
 
 	SetCapture ( g_wv.hWnd );
 	ClipCursor (&window_rect);
-	while (ShowCursor (FALSE) >= 0)
-		;
 }
 
 void IN_ActivateRawMouse( void ) 
@@ -166,7 +166,6 @@ void IN_DeactivateWin32Mouse( void )
 {
 	ClipCursor (NULL);
 	ReleaseCapture ();
-	while (ShowCursor (TRUE) < 0);
 }
 
 void IN_DeactivateRawMouse( void ) 
@@ -272,6 +271,30 @@ static LPDIRECTINPUT8A			g_pdi;
 static LPDIRECTINPUTDEVICE8A	g_pMouse;
 
 void IN_DIMouse( int *mx, int *my );
+
+
+
+/**
+ * Show windows cursor.
+ */
+void IN_CursorShow (void)
+{
+	while (ShowCursor(TRUE) < 0)
+		;
+}
+
+
+
+/**
+ * Hide windows cursor.
+ */
+void IN_CursorHide (void)
+{
+	while (ShowCursor(FALSE) >= 0)
+		;
+}
+
+
 
 /*
 ========================
@@ -566,6 +589,7 @@ void IN_ActivateMouse( void )
 	// Win32 WM_ messages
 	else if (in_mouse->integer == -1) IN_ActivateWin32Mouse();
 	
+	IN_CursorHide();
 }
 
 
@@ -584,6 +608,7 @@ void IN_DeactivateMouse( void ) {
 	IN_DeactivateDIMouse();
 	IN_DeactivateWin32Mouse();
 	IN_DeactivateRawMouse();
+	IN_CursorShow();
 }
 
 
@@ -802,7 +827,11 @@ void IN_Frame (void) {
 	if ( cls.keyCatchers & KEYCATCH_CONSOLE ) {
 		if ( Cvar_VariableValue ("r_fullscreen") == 0 )	{
 			IN_DeactivateMouse();
+			return;
 		}
+		int mx, my;
+		// capture mouse button input from DI
+		IN_DIMouse(&mx, &my);
 		return;
 	}
 
@@ -1226,15 +1255,8 @@ void IN_HandleRawMouseData(HRAWINPUT hndlmouse)
 	UINT dwSize;
 	RAWINPUT* raw;
 
-	if ( cls.keyCatchers & KEYCATCH_CONSOLE ) {
-		if ( Cvar_VariableValue ("r_fullscreen") == 0 )	{
-			IN_DeactivateMouse();
-		}
-		return;
-	}
-
-        // even in raw mouse mode, it is necessary to keep warping the pointer to the center to avoid the mouse sliding out in windowed mode
-	SetCursorPos( window_center_x, window_center_y );
+	// even in raw mouse mode, it is necessary to keep warping the pointer to the center to avoid the mouse sliding out in windowed mode
+	if ((cls.keyCatchers & KEYCATCH_CONSOLE) != KEYCATCH_CONSOLE) SetCursorPos(window_center_x, window_center_y);
 	
 	if (GetRawInputData(hndlmouse, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER)) == (UINT)-1)
 	{
@@ -1264,7 +1286,7 @@ void IN_HandleRawMouseData(HRAWINPUT hndlmouse)
 	{
 		Com_DPrintf("Absolute mouse data not supported.");
 	}
-	else
+	else if ((cls.keyCatchers & KEYCATCH_CONSOLE) != KEYCATCH_CONSOLE)
 	{
 		if (raw->data.mouse.lLastX != 0 || raw->data.mouse.lLastY != 0)
 		{

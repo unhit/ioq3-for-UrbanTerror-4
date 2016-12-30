@@ -24,7 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "q_shared.h"
 #include "qcommon.h"
 
-#define	MAX_CMD_BUFFER	65536
+// p5yc0runn3r - Increased cmd buffer by 2 for longer cfg scripts.
+#define	MAX_CMD_BUFFER	131072
 #define	MAX_CMD_LINE	1024
 
 typedef struct {
@@ -479,7 +480,7 @@ void Cmd_Args_Sanitize( void ) {
 	int i;
 	for ( i = 1 ; i < cmd_argc ; i++ ) {
 		char* c = cmd_argv[i];
-		while ((c = strpbrk(c, "\n\r;"))) {
+		while ((c = strpbrk(c, "\n\r"))) {
 			*c = ' ';
 			++c;
 		}

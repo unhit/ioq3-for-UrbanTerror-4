@@ -40,6 +40,10 @@ void Key_WriteBindings( fileHandle_t f ) {
 void CL_Frame ( int msec ) {
 }
 
+qboolean CL_IsDownloading(void) {
+	return qfalse;
+}
+
 void CL_PacketEvent( netadr_t from, msg_t *msg ) {
 }
 
@@ -67,6 +71,9 @@ void CL_ForwardCommandToServer( const char *string ) {
 }
 
 void CL_ConsolePrint( char *txt ) {
+}
+
+void CL_DevConsolePrint( char *txt ) {
 }
 
 void CL_JoystickEvent( int axis, int value, int time ) {

@@ -43,51 +43,53 @@ When an authorizeip is returned, a challenge response will be
 sent to that ip.
 =================
 */
-void SV_GetChallenge( netadr_t from ) {
-	int		i;
-	int		oldest;
-	int		oldestTime;
-	challenge_t	*challenge;
+void SV_GetChallenge(netadr_t from) {
 
-	// ignore if we are in single player
-	if ( Cvar_VariableValue( "g_gametype" ) == GT_SINGLE_PLAYER || Cvar_VariableValue("ui_singlePlayerActive")) {
-		return;
-	}
+    int          i;
+    int          oldest;
+    int          oldestTime;
+    challenge_t  *challenge;
 
-	oldest = 0;
-	oldestTime = 0x7fffffff;
+    oldest = 0;
+    oldestTime = 0x7fffffff;
 
-	// see if we already have a challenge for this ip
-	challenge = &svs.challenges[0];
-	for (i = 0 ; i < MAX_CHALLENGES ; i++, challenge++) {
-		if ( !challenge->connected && NET_CompareAdr( from, challenge->adr ) ) {
-			break;
-		}
-		if ( challenge->time < oldestTime ) {
-			oldestTime = challenge->time;
-			oldest = i;
-		}
-	}
+    // see if we already have a challenge for this ip
+    challenge = &svs.challenges[0];
+    for (i = 0 ; i < MAX_CHALLENGES ; i++, challenge++) {
 
-	if (i == MAX_CHALLENGES) {
-		// this is the first time this client has asked for a challenge
-		challenge = &svs.challenges[oldest];
+        if (!challenge->connected && NET_CompareAdr(from, challenge->adr)) {
+            break;
+        }
 
-		challenge->adr = from;
-		challenge->firstTime = svs.time;
-		challenge->connected = qfalse;
-		i = oldest;
-	}
+        if (challenge->time < oldestTime) {
+            oldestTime = challenge->time;
+            oldest = i;
+        }
 
-	// always generate a new challenge number, so the client cannot circumvent sv_maxping
-    challenge->challenge = ( (rand() << 16) ^ rand() ) ^ svs.time;
-    challenge->wasrefused = qfalse;
-    challenge->time = svs.time;
+    }
 
-    challenge->pingTime = svs.time;
+    if (i == MAX_CHALLENGES) {
 
-	NET_OutOfBandPrint( NS_SERVER, from, "challengeResponse %i", challenge->challenge );
-	return;
+        // this is the first time this client has asked for a challenge
+        challenge = &svs.challenges[oldest];
+
+        challenge->challenge = ((rand() << 16) ^ rand()) ^ svs.time;
+        challenge->adr = from;
+        challenge->pingTime = -1;
+        challenge->firstTime = svs.time;
+        challenge->time = svs.time;
+        challenge->connected = qfalse;
+        i = oldest;
+
+    }
+
+    if (challenge->pingTime == -1) {
+        challenge->pingTime = svs.time;
+    }
+
+    NET_OutOfBandPrint(NS_SERVER, from, "challengeResponse %i", challenge->challenge);
+    return;
+
 }
 
 /*
@@ -123,8 +125,9 @@ void SV_AuthorizeIpPacket( netadr_t from ) {
 	}
 
 	// send a packet back to the original client
-	if (svs.challenges[i].pingTime == -1)
+	if (svs.challenges[i].pingTime == -1) {
 		svs.challenges[i].pingTime = svs.time; 
+	}
 
 	s = Cmd_Argv( 2 );
 	r = Cmd_Argv( 3 );			// reason
@@ -172,272 +175,281 @@ A "connect" OOB command has been received
 */
 
 #define PB_MESSAGE "PunkBuster Anti-Cheat software must be installed " \
-				"and Enabled in order to join this server. An updated game patch can be downloaded from " \
-				"www.idsoftware.com"
+                   "and Enabled in order to join this server. An updated game patch can be downloaded from " \
+                   "www.idsoftware.com"
 
-void SV_DirectConnect( netadr_t from ) {
-	char		userinfo[MAX_INFO_STRING];
-	int			i;
-	client_t	*cl, *newcl;
-	client_t	temp;
-	sharedEntity_t *ent;
-	int			clientNum;
-	int			version;
-	int			qport;
-	int			challenge;
-	char		*password;
-	int			startIndex;
-	intptr_t		denied;
-	int			count;
-	char		*ip;
+void SV_DirectConnect(netadr_t from) {
 
-	Com_DPrintf ("SVC_DirectConnect ()\n");
+    char            userinfo[MAX_INFO_STRING];
+    int             i, j;
+    client_t        temp;
+    client_t       *cl, *newcl;
+    sharedEntity_t *ent;
+    char           *password;
+    int             clientNum;
+    int             version;
+    int             qport;
+    int             challenge;
+    int             startIndex;
+    intptr_t        denied;
+    int             count;
+    int             numIpClients = 0;
 
-	Q_strncpyz( userinfo, Cmd_Argv(1), sizeof(userinfo) );
+    Com_DPrintf("SV_DirectConnect()\n");
 
-	version = atoi( Info_ValueForKey( userinfo, "protocol" ) );
-	if ( version != PROTOCOL_VERSION ) {
-		NET_OutOfBandPrint( NS_SERVER, from, "print\nServer uses protocol version %i.\n", PROTOCOL_VERSION );
-		Com_DPrintf ("    rejected connect from version %i\n", version);
-		return;
-	}
+    Q_strncpyz(userinfo, Cmd_Argv(1), sizeof(userinfo));
 
-	challenge = atoi( Info_ValueForKey( userinfo, "challenge" ) );
-	qport = atoi( Info_ValueForKey( userinfo, "qport" ) );
+    version = atoi(Info_ValueForKey(userinfo, "protocol"));
+    if (version != PROTOCOL_VERSION) {
+        NET_OutOfBandPrint(NS_SERVER, from, "print\nServer uses protocol version %i.\n", PROTOCOL_VERSION);
+        Com_DPrintf("    rejected connect from version %i\n", version);
+        return;
+    }
 
-	// quick reject
-	for (i=0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++) {
-		if ( cl->state == CS_FREE ) {
-			continue;
-		}
-		if ( NET_CompareBaseAdr( from, cl->netchan.remoteAddress )
-			&& ( cl->netchan.qport == qport 
-			|| from.port == cl->netchan.remoteAddress.port ) ) {
-			if (( svs.time - cl->lastConnectTime) 
-				< (sv_reconnectlimit->integer * 1000)) {
-				Com_DPrintf ("%s:reconnect rejected : too soon\n", NET_AdrToString (from));
-				return;
-			}
-			break;
-		}
-	}
-	
-	// don't let "ip" overflow userinfo string
-	if ( NET_IsLocalAddress (from) )
-		ip = "localhost";
-	else
-		ip = (char *)NET_AdrToString( from );
-	if( ( strlen( ip ) + strlen( userinfo ) + 4 ) >= MAX_INFO_STRING ) {
-		NET_OutOfBandPrint( NS_SERVER, from,
-			"print\nUserinfo string length exceeded.  "
-			"Try removing setu cvars from your config.\n" );
-		return;
-	}
-	Info_SetValueForKey( userinfo, "ip", ip );
+    challenge = atoi(Info_ValueForKey(userinfo, "challenge"));
+    qport = atoi(Info_ValueForKey(userinfo, "qport"));
 
-	// see if the challenge is valid (LAN clients don't need to challenge)
-	if ( !NET_IsLocalAddress (from) ) {
-		int		ping;
+    // quick reject
+    for (i = 0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++) {
 
-		for (i=0 ; i<MAX_CHALLENGES ; i++) {
-			if (NET_CompareAdr(from, svs.challenges[i].adr)) {
-				if ( challenge == svs.challenges[i].challenge ) {
-					break;		// good
-				}
-			}
-		}
-		if (i == MAX_CHALLENGES) {
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nNo or bad challenge for address.\n" );
-			return;
-		}
+        if (cl->state == CS_FREE) {
+            continue;
+        }
 
-		// Return silently, so that error messages written by the server keep being displayed.
-		if(svs.challenges[i].wasrefused)
-			return;
+        if (NET_CompareBaseAdr(from, cl->netchan.remoteAddress) && (cl->netchan.qport == qport || from.port == cl->netchan.remoteAddress.port)) {
 
-		if (!svs.challenges[i].connected) {
-			ping = svs.time - svs.challenges[i].pingTime;
-			svs.challenges[i].challengePing = ping;
- 			Com_Printf("Client %i connecting with %i challenge ping\n", i, ping);
- 		}
+            if ((svs.time - cl->lastConnectTime) < (sv_reconnectlimit->integer * 1000)) {
+                Com_DPrintf("%s:reconnect rejected : too soon\n", NET_AdrToString (from));
+                return;
+            }
 
- 		else {
-			ping = svs.challenges[i].challengePing;
- 			Com_DPrintf("Client %i connecting again with %i challenge ping\n", i, ping);
- 		}
+            break;
+        }
+    }
 
-		// never reject a LAN client based on ping
-		if ( !Sys_IsLANAddress( from ) ) {
+    // see if the challenge is valid (LAN clients don't need to challenge)
+    if (!NET_IsLocalAddress (from)) {
 
-			if ( (sv_minPing->value > 0) && ping < sv_minPing->value ) {
-				// don't let them keep trying until they get a big delay
-				NET_OutOfBandPrint( NS_SERVER, from, "print\nServer is for high pings only\n" );
-				Com_DPrintf ("Client %i rejected on a too low ping\n", i);
-				// reset the address otherwise their ping will keep increasing
-				// with each connect message and they'd eventually be able to connect
-				svs.challenges[i].adr.port = 0;
-				svs.challenges[i].wasrefused = qtrue;
-				return;
-			}
+        int ping;
 
-			if ( (sv_maxPing->value > 0) && ping > sv_maxPing->value ) {
-				NET_OutOfBandPrint( NS_SERVER, from, "print\nServer is for low pings only\n" );
-				Com_DPrintf ("Client %i rejected on a too high ping\n", i);
-				svs.challenges[i].adr.port = 0;
-				svs.challenges[i].wasrefused = qtrue;
-				return;
-			}
-		}
-	}
+        for (i = 0 ; i < MAX_CHALLENGES; i++) {
+            if (NET_CompareAdr(from, svs.challenges[i].adr)) {
+                if (challenge == svs.challenges[i].challenge) {
+                    break;  // good
+                }
+            }
+        }
 
-	newcl = &temp;
-	Com_Memset (newcl, 0, sizeof(client_t));
+        if (i == MAX_CHALLENGES) {
+            NET_OutOfBandPrint(NS_SERVER, from, "print\nNo or bad challenge for address.\n");
+            return;
+        }
 
-	// if there is already a slot for this ip, reuse it
-	for (i=0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++) {
-		if ( cl->state == CS_FREE ) {
-			continue;
-		}
-		if ( NET_CompareBaseAdr( from, cl->netchan.remoteAddress )
-			&& ( cl->netchan.qport == qport 
-			|| from.port == cl->netchan.remoteAddress.port ) ) {
-			Com_Printf ("%s:reconnect\n", NET_AdrToString (from));
-			newcl = cl;
+        // force the IP key/value pair so the game can filter based on ip
+        Info_SetValueForKey(userinfo, "ip", NET_AdrToString(from));
 
-			// this doesn't work because it nukes the players userinfo
+        // Note that it is totally possible to flood the console and qconsole.log by being rejected
+        // (high ping, ban, server full, or other) and repeatedly sending a connect packet against the same
+        // challenge.  Prevent this situation by only logging the first time we hit SV_DirectConnect()
+        // for this challenge.
+        if (!svs.challenges[i].connected) {
+            ping = svs.time - svs.challenges[i].pingTime;
+            svs.challenges[i].challengePing = ping;
+            Com_Printf("Client %i connecting with %i challenge ping\n", i, ping);
+        }
+        else {
+            ping = svs.challenges[i].challengePing;
+            Com_DPrintf("Client %i connecting again with %i challenge ping\n", i, ping);
+        }
 
-//			// disconnect the client from the game first so any flags the
-//			// player might have are dropped
-//			VM_Call( gvm, GAME_CLIENT_DISCONNECT, newcl - svs.clients );
-			//
-			goto gotnewcl;
-		}
-	}
+        svs.challenges[i].connected = qtrue;
 
-	// find a client slot
-	// if "sv_privateClients" is set > 0, then that number
-	// of client slots will be reserved for connections that
-	// have "password" set to the value of "sv_privatePassword"
-	// Info requests will report the maxclients as if the private
-	// slots didn't exist, to prevent people from trying to connect
-	// to a full server.
-	// This is to allow us to reserve a couple slots here on our
-	// servers so we can play without having to kick people.
+        // never reject a LAN client based on ping
+        if (!Sys_IsLANAddress(from)) {
 
-	// check for privateClient password
-	password = Info_ValueForKey( userinfo, "password" );
-	if ( !strcmp( password, sv_privatePassword->string ) ) {
-		startIndex = 0;
-	} else {
-		// skip past the reserved slots
-		startIndex = sv_privateClients->integer;
-	}
+            for (j=0,cl=svs.clients ; j < sv_maxclients->integer ; j++,cl++) {
+                if ( cl->state == CS_FREE ) {
+                    continue;
+                }   
+                if ( NET_CompareBaseAdr( from, cl->netchan.remoteAddress )
+                    && !( cl->netchan.qport == qport 
+                    || from.port == cl->netchan.remoteAddress.port ) ) {
+                    numIpClients++; 
+                }   
+            }
 
-	newcl = NULL;
-	for ( i = startIndex; i < sv_maxclients->integer ; i++ ) {
-		cl = &svs.clients[i];
-		if (cl->state == CS_FREE) {
-			newcl = cl;
-			break;
-		}
-	}
+            if (sv_clientsPerIp->integer && numIpClients >= sv_clientsPerIp->integer) {
+                NET_OutOfBandPrint(NS_SERVER, from, "print\nToo many connections from the same IP\n");
+                Com_DPrintf ("Client %i rejected due to too many connections from the same IP\n", i);
+                return;
+            }
 
-	if ( !newcl ) {
-		if ( NET_IsLocalAddress( from ) ) {
-			count = 0;
-			for ( i = startIndex; i < sv_maxclients->integer ; i++ ) {
-				cl = &svs.clients[i];
-				if (cl->netchan.remoteAddress.type == NA_BOT) {
-					count++;
-				}
-			}
-			// if they're all bots
-			if (count >= sv_maxclients->integer - startIndex) {
-				SV_DropClient(&svs.clients[sv_maxclients->integer - 1], "only bots on server");
-				newcl = &svs.clients[sv_maxclients->integer - 1];
-			}
-			else {
-				Com_Error( ERR_FATAL, "server is full on local connect\n" );
-				return;
-			}
-		}
-		else {
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nServer is full.\n" );
-			Com_DPrintf ("Rejected a connection.\n");
-			return;
-		}
-	}
+            if (sv_minPing->value && ping < sv_minPing->value) {
+                NET_OutOfBandPrint(NS_SERVER, from, "print\nServer is for high pings only\n");
+                Com_DPrintf ("Client %i rejected on a too low ping\n", i);
+                return;
+            }
 
-	// we got a newcl, so reset the reliableSequence and reliableAcknowledge
-	cl->reliableAcknowledge = 0;
-	cl->reliableSequence = 0;
+            if (sv_maxPing->value && ping > sv_maxPing->value) {
+                NET_OutOfBandPrint(NS_SERVER, from, "print\nServer is for low pings only\n");
+                Com_DPrintf ("Client %i rejected on a too high ping\n", i);
+                return;
+            }
 
-gotnewcl:	
-	// build a new connection
-	// accept the new client
-	// this is the only place a client_t is ever initialized
-	*newcl = temp;
-	clientNum = newcl - svs.clients;
-	ent = SV_GentityNum( clientNum );
-	newcl->gentity = ent;
+        }
 
-	// save the challenge
-	newcl->challenge = challenge;
+    } else {
+        // force the "ip" info key to "localhost"
+        Info_SetValueForKey(userinfo, "ip", "localhost");
+    }
 
-	// save the address
-	Netchan_Setup (NS_SERVER, &newcl->netchan , from, qport);
-	// init the netchan queue
-	newcl->netchan_end_queue = &newcl->netchan_start_queue;
+    newcl = &temp;
+    Com_Memset(newcl, 0, sizeof(client_t));
 
-	// clear server-side demo recording
-	newcl->demo_recording = qfalse;
-	newcl->demo_file = -1;
-	newcl->demo_waiting = qfalse;
-	newcl->demo_backoff = 1;
-	newcl->demo_deltas = 0;
-	
-	// save the userinfo
-	Q_strncpyz( newcl->userinfo, userinfo, sizeof(newcl->userinfo) );
+    // if there is already a slot for this ip, reuse it
+    for (i = 0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++) {
 
-	// get the game a chance to reject this connection or modify the userinfo
-	denied = VM_Call( gvm, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse ); // firstTime = qtrue
-	if ( denied ) {
-		// we can't just use VM_ArgPtr, because that is only valid inside a VM_Call
-		char *str = VM_ExplicitArgPtr( gvm, denied );
+        if (cl->state == CS_FREE) {
+            continue;
+        }
 
-		NET_OutOfBandPrint( NS_SERVER, from, "print\n%s\n", str );
-		Com_DPrintf ("Game rejected a connection: %s.\n", str);
-		return;
-	}
+        if (NET_CompareBaseAdr(from, cl->netchan.remoteAddress) && (cl->netchan.qport == qport || from.port == cl->netchan.remoteAddress.port)) {
+            Com_Printf ("%s:reconnect\n", NET_AdrToString (from));
+            newcl = cl;
+            goto gotnewcl;
+        }
+    }
 
-	SV_UserinfoChanged( newcl );
+    // find a client slot
+    // if "sv_privateClients" is set > 0, then that number
+    // of client slots will be reserved for connections that
+    // have "password" set to the value of "sv_privatePassword"
+    // Info requests will report the maxclients as if the private
+    // slots didn't exist, to prevent people from trying to connect
+    // to a full server.
+    // This is to allow us to reserve a couple slots here on our
+    // servers so we can play without having to kick people.
 
-	// send the connect packet to the client
-	NET_OutOfBandPrint( NS_SERVER, from, "connectResponse" );
+    // check for privateClient password
+    password = Info_ValueForKey(userinfo, "password");
+    if (!strcmp(password, sv_privatePassword->string)) {
+        startIndex = 0;
+    } else {
+        // skip past the reserved slots
+        startIndex = sv_privateClients->integer;
+    }
 
-	Com_DPrintf( "Going from CS_FREE to CS_CONNECTED for %s\n", newcl->name );
+    newcl = NULL;
+    for (i = startIndex; i < sv_maxclients->integer ; i++) {
+        cl = &svs.clients[i];
+        if (cl->state == CS_FREE) {
+            newcl = cl;
+            break;
+        }
+    }
 
-	newcl->state = CS_CONNECTED;
-	newcl->nextSnapshotTime = svs.time;
-	newcl->lastPacketTime = svs.time;
-	newcl->lastConnectTime = svs.time;
-	
-	// when we receive the first packet from the client, we will
-	// notice that it is from a different serverid and that the
-	// gamestate message was not just sent, forcing a retransmit
-	newcl->gamestateMessageNum = -1;
+    if (!newcl) {
 
-	// if this was the first client on the server, or the last client
-	// the server can hold, send a heartbeat to the master.
-	count = 0;
-	for (i=0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++) {
-		if ( svs.clients[i].state >= CS_CONNECTED ) {
-			count++;
-		}
-	}
-	if ( count == 1 || count == sv_maxclients->integer ) {
-		SV_Heartbeat_f();
-	}
+        if (NET_IsLocalAddress(from)) {
+
+            count = 0;
+            for (i = startIndex; i < sv_maxclients->integer ; i++) {
+                cl = &svs.clients[i];
+                if (cl->netchan.remoteAddress.type == NA_BOT) {
+                    count++;
+                }
+            }
+
+            // if they're all bots
+            if (count >= sv_maxclients->integer - startIndex) {
+                SV_DropClient(&svs.clients[sv_maxclients->integer - 1], "only bots on server");
+                newcl = &svs.clients[sv_maxclients->integer - 1];
+            }
+            else {
+                Com_Error(ERR_FATAL, "server is full on local connect\n");
+                return;
+            }
+        }
+        else {
+            NET_OutOfBandPrint(NS_SERVER, from, "print\nServer is full\n");
+            Com_DPrintf("Rejected a connection.\n");
+            return;
+        }
+
+    }
+
+    // we got a newcl, so reset the reliableSequence and reliableAcknowledge
+    cl->reliableAcknowledge = 0;
+    cl->reliableSequence = 0;
+
+gotnewcl:
+    // build a new connection
+    // accept the new client
+    // this is the only place a client_t is ever initialized
+    *newcl = temp;
+    clientNum = newcl - svs.clients;
+    ent = SV_GentityNum(clientNum);
+    newcl->gentity = ent;
+
+    // save the challenge
+    newcl->challenge = challenge;
+
+    // save the address
+    Netchan_Setup (NS_SERVER, &newcl->netchan , from, qport);
+    // init the netchan queue
+    newcl->netchan_end_queue = &newcl->netchan_start_queue;
+
+    // clear server-side demo recording
+    newcl->demo_recording = qfalse;
+    newcl->demo_file = -1;
+    newcl->demo_waiting = qfalse;
+    newcl->demo_backoff = 1;
+    newcl->demo_deltas = 0;
+
+    // save the userinfo
+    Q_strncpyz(newcl->userinfo, userinfo, sizeof(newcl->userinfo));
+
+    // get the game a chance to reject this connection or modify the userinfo
+    denied = VM_Call(gvm, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse); // firstTime = qtrue
+    if (denied) {
+        // we can't just use VM_ArgPtr, because that is only valid inside a VM_Call
+        char *str = VM_ExplicitArgPtr(gvm, denied);
+        NET_OutOfBandPrint(NS_SERVER, from, "print\n%s\n", str);
+        Com_DPrintf ("Game rejected a connection: %s.\n", str);
+        return;
+    }
+
+    SV_UserinfoChanged(newcl);
+
+    // send the connect packet to the client
+    NET_OutOfBandPrint(NS_SERVER, from, "connectResponse");
+
+    Com_DPrintf("Going from CS_FREE to CS_CONNECTED for %s\n", newcl->name);
+
+    newcl->state = CS_CONNECTED;
+    newcl->nextSnapshotTime = svs.time;
+    newcl->lastPacketTime = svs.time;
+    newcl->lastConnectTime = svs.time;
+    newcl->numcmds = 0;
+
+    // when we receive the first packet from the client, we will
+    // notice that it is from a different serverid and that the
+    // gamestate message was not just sent, forcing a retransmit
+    newcl->gamestateMessageNum = -1;
+
+    // if this was the first client on the server, or the last client
+    // the server can hold, send a heartbeat to the master.
+    count = 0;
+    for (i=0,cl=svs.clients ; i < sv_maxclients->integer ; i++,cl++) {
+        if (svs.clients[i].state >= CS_CONNECTED) {
+            count++;
+        }
+    }
+
+    if (count == 1 || count == sv_maxclients->integer) {
+        SV_Heartbeat_f();
+    }
+
 }
 
 
@@ -476,10 +488,14 @@ void SV_DropClient( client_t *drop, const char *reason ) {
 	// tell everyone why they got dropped
 	SV_SendServerCommand( NULL, "print \"%s" S_COLOR_WHITE " %s\n\"", drop->name, reason );
 
-
 	if (drop->download)	{
 		FS_FCloseFile( drop->download );
 		drop->download = 0;
+	}
+
+	if (drop->demo_recording) {
+	    // stop the server side demo if we were recording this client
+       Cbuf_ExecuteText(EXEC_NOW, va("stopserverdemo %d", (int)(drop - svs.clients)));
 	}
 
 	// call the prog function for removing a client
@@ -508,6 +524,7 @@ void SV_DropClient( client_t *drop, const char *reason ) {
 			break;
 		}
 	}
+
 	if ( i == sv_maxclients->integer ) {
 		SV_Heartbeat_f();
 	}
@@ -524,6 +541,7 @@ or crashing -- SV_FinalMessage() will handle that
 =====================
 */
 void SV_Auth_DropClient( client_t *drop, const char *reason, const char *message ) {
+
 	int		i;
 	challenge_t	*challenge;
 
@@ -549,11 +567,15 @@ void SV_Auth_DropClient( client_t *drop, const char *reason, const char *message
 	// tell everyone why they got dropped
 	if( strlen( reason ) > 0 ) SV_SendServerCommand( NULL, "print \"%s\n\"", reason );
 
-
 	if (drop->download)	{
 		FS_FCloseFile( drop->download );
 		drop->download = 0;
 	}
+
+	if (drop->demo_recording) {
+        // stop the server side demo if we were recording this client
+       Cbuf_ExecuteText(EXEC_NOW, va("stopserverdemo %d", (int)(drop - svs.clients)));
+    }
 
 	// call the prog function for removing a client
 	// this will remove the body, among other things
@@ -581,6 +603,7 @@ void SV_Auth_DropClient( client_t *drop, const char *reason, const char *message
 			break;
 		}
 	}
+
 	if ( i == sv_maxclients->integer ) {
 		SV_Heartbeat_f();
 	}
@@ -1044,10 +1067,6 @@ The client is going to disconnect, so remove the connection immediately  FIXME: 
 =================
 */
 static void SV_Disconnect_f( client_t *cl ) {
-	// stop server-side demo (if any)
-	if (cl->demo_recording) {
-		Cbuf_ExecuteText(EXEC_NOW, va("stopserverdemo %d", (int)(cl-svs.clients)));
-	}
 	SV_DropClient( cl, "disconnected" );
 }
 
@@ -1474,11 +1493,16 @@ static qboolean SV_ClientCommand( client_t *cl, msg_t *msg ) {
 	// normal to spam a lot of commands when downloading
 	if ( !com_cl_running->integer && 
 		cl->state >= CS_ACTIVE &&
-		sv_floodProtect->integer && 
-		svs.time < cl->nextReliableTime ) {
-		// ignore any other text messages from this client but let them keep playing
-		// TTimo - moved the ignored verbose to the actual processing in SV_ExecuteClientCommand, only printing if the core doesn't intercept
-		clientOk = qfalse;
+		sv_floodProtect->integer ) {
+		if (svs.time < cl->nextReliableTime ) {
+			if (++(cl->numcmds) > sv_floodProtect->integer ) {
+				// ignore any other text messages from this client but let them keep playing
+				// TTimo - moved the ignored verbose to the actual processing in SV_ExecuteClientCommand, only printing if the core doesn't intercept
+				clientOk = qfalse;
+			}
+		} else {
+			 cl->numcmds = 1;
+		}
 	} 
 
 	// don't allow another command for one second

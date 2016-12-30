@@ -37,7 +37,7 @@ int demo_protocols[] =
 #define MAX_NUM_ARGVS	50
 
 #define MIN_DEDICATED_COMHUNKMEGS 96
-#define MIN_COMHUNKMEGS		256
+#define MIN_COMHUNKMEGS		512
 #define DEF_COMHUNKMEGS		512 //@Barbatos - previously 256
 #define DEF_COMZONEMEGS		32 //@Barbatos - previously 24
 #define XSTRING(x)				STRING(x)
@@ -80,6 +80,10 @@ cvar_t	*sv_paused;
 cvar_t  *cl_packetdelay;
 cvar_t  *sv_packetdelay;
 cvar_t	*com_cameraMode;
+cvar_t 	*com_logfileName;
+
+qboolean dev = qfalse;
+
 #if defined(_WIN32) && defined(_DEBUG)
 cvar_t	*com_noErrorInterrupt;
 #endif
@@ -163,7 +167,10 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 
 	// echo to console if we're not a dedicated server
 	if ( com_dedicated && !com_dedicated->integer ) {
-		CL_ConsolePrint( msg );
+		if (dev)
+			CL_DevConsolePrint(msg);
+		else
+			CL_ConsolePrint(msg);
 	}
 
 	// echo to dedicated console and early console
@@ -182,7 +189,7 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 			time( &aclock );
 			newtime = localtime( &aclock );
 
-			logfile = FS_FOpenFileWrite( "qconsole.log" );
+			logfile = FS_FOpenFileWrite( com_logfileName->string );
 			
 			if(logfile)
 			{
@@ -197,7 +204,7 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 			}
 			else
 			{
-				Com_Printf("Opening qconsole.log failed!\n");
+				Com_Printf("Opening %s failed!\n", com_logfileName->string);
 				Cvar_SetValue("logfile", 0);
 			}
 
@@ -229,7 +236,9 @@ void QDECL Com_DPrintf( const char *fmt, ...) {
 	Q_vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 	
+	dev = qtrue;
 	Com_Printf ("%s", msg);
+	dev = qfalse;
 }
 
 /*
@@ -1706,7 +1715,7 @@ void *Hunk_Alloc( int size, ha_pref preference ) {
 		Hunk_Log();
 		Hunk_SmallLog();
 #endif
-		Com_Error( ERR_DROP, "Hunk_Alloc failed on %i", size );
+		Com_Error( ERR_DROP, "Hunk_Alloc failed on %i - you must raise the value of the cvar com_hunkmegs and restart your game.", size );
 	}
 
 	if ( hunk_permanent == &hunk_low ) {
@@ -2467,6 +2476,7 @@ void Com_Init( char *commandLine ) {
 
 	com_developer = Cvar_Get ("developer", "0", CVAR_TEMP );
 	com_logfile = Cvar_Get ("logfile", "0", CVAR_TEMP );
+	com_logfileName = Cvar_Get("logfileName", "qconsole.log", CVAR_ARCHIVE);
 
 	com_timescale = Cvar_Get ("timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
 	com_fixedtime = Cvar_Get ("fixedtime", "0", CVAR_CHEAT);
@@ -2737,7 +2747,7 @@ void Com_Frame( void ) {
 	}
 
 	// we may want to spin here if things are going too fast
-	if ( !com_dedicated->integer && com_maxfps->integer > 0 && !com_timedemo->integer ) {
+	if ( !com_dedicated->integer && com_maxfps->integer > 0 && !com_timedemo->integer && !CL_IsDownloading()) {
 		minMsec = 1000 / com_maxfps->integer;
 	} else {
 		minMsec = 1;

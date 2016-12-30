@@ -1200,7 +1200,32 @@ void Sys_AppActivate (void)
 
 char *Sys_GetClipboardData(void)
 {
-  return NULL;
+  char *data = NULL;
+  char *cliptext;
+  FILE *fp;
+
+  #ifdef MACOS_X
+  fp = popen("/usr/bin/pbpaste", "r");
+  #else
+  if (access("/usr/bin/xclip", F_OK) != -1) {
+      fp = popen("/usr/bin/xclip -o", "r");
+  } else if (access("/usr/local/bin/xclip", F_OK) != -1) {
+      fp = popen("/usr/local/bin/xclip -o", "r");
+  } else {
+      return NULL;
+  }
+  #endif
+  if (fp != NULL) {
+    cliptext = Z_Malloc(MAX_STRING_CHARS);
+    if (fgets(cliptext, MAX_STRING_CHARS-1, fp) != NULL) {
+      data = Z_Malloc(MAX_STRING_CHARS + 1);
+      Q_strncpyz(data, cliptext, MAX_STRING_CHARS);
+      strtok(data, "\n\r\b");
+    }
+    pclose(fp);
+  }
+
+  return data;
 }
 
 static struct Q3ToAnsiColorTable_s
@@ -1511,6 +1536,22 @@ void Sys_ParseArgs( int argc, char* argv[] ) {
       Sys_Exit(0);
     }
   }
+}
+
+/*
+==============
+Sys_SetEnv
+
+set/unset environment variables (empty value removes it)
+==============
+*/
+
+void Sys_SetEnv(const char *name, const char *value)
+{
+  if(value && *value)
+    setenv(name, value, 1);
+  else
+    unsetenv(name);
 }
 
 #ifdef MACOS_X
